@@ -63,3 +63,18 @@
 - This answered the biggest open question without reading a line of the app's code: observation + a hypothesis + checking it against OS metadata.
 - Spec: `docs/spec/05-apps-unused-uninstaller.md`.
 - Confirmation: the agent predicted the 4 "unused" apps from the date rule before seeing the filter; the user opened the Unused filter and it listed exactly those 4. A predict-then-verify loop is the strongest evidence a black-box study can produce.
+
+## 2026-10-17 — First implementation: engine + CLI, run on the same Mac
+- Built from `docs/spec/` only: Swift package with `KachraCore` (read-only scanners, rules file, Trash-only cleaner) and a `kachra` CLI. 11 tests (project classification and judging, duplicate keep rule, cleaner refusals, rule-file integrity, purgeable formula).
+- No Xcode on this Mac, only the Command Line Tools: the `Testing` framework needs explicit `-F`/rpath flags (`scripts/test.sh`).
+- First full read-only scan on the reference Mac: 58 s.
+
+| | Reference app (pre-selected) | KachraClean |
+|---|---|---|
+| Safe to remove | 17.6 GB | 39.6 GB |
+| Total reported (safe + review) | 17.6 GB | 108.8 GB |
+| Project dependencies & builds | not listed | 43.9 GB in 120 folders (13.3 GB safe: idle projects with lockfiles) |
+| AI models & datasets | not listed | 37.7 GB (review) |
+| Purgeable estimate | 2.7 GB | 2.76 GB |
+
+- Two bugs found by looking at real output, then fixed: an environment folder directly in the home folder was named after the user account; a datasets cache was marked safe instead of review.

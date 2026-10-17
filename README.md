@@ -29,6 +29,22 @@ Safety comes first:
 > Status: early development. The research phase is complete (see `docs/spec/`). Implementation has
 > just started.
 
+## Try it (command line)
+
+You need macOS 14 or later and Swift 6. The Xcode Command Line Tools are enough.
+
+```bash
+swift build -c release
+.build/release/kachra scan                       # read-only; saves a report
+.build/release/kachra scan --only projectArtifacts,models --top 20
+.build/release/kachra clean --category toolCaches # dry run: shows what would move to the Trash
+.build/release/kachra clean --id <id> --yes       # actually moves that finding to the Trash
+./scripts/test.sh                                 # run the tests
+```
+
+Give your terminal **Full Disk Access** (System Settings → Privacy & Security) so the scan can see
+other apps' caches and containers.
+
 ## The case study
 
 KachraClean also documents how we used [REA](https://github.com/morluto/rea) and an AI agent to study
