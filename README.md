@@ -26,14 +26,30 @@ Safety comes first:
 - Nothing is deleted without a preview.
 - Removal moves items to the Trash.
 
-> Status: early development. The research phase is complete (see `docs/spec/`). Implementation has
-> just started.
+> Status: early preview (0.1.0). The research phase is complete (see `docs/spec/`).
 
-## Try the app
+## Download
+
+Get the latest `KachraClean-<version>.dmg` from
+[Releases](https://github.com/nikhilrdeshpande/KachraClean/releases/latest). Open it and drag
+**KachraClean** to **Applications**. It runs on macOS 14 or later, on Apple silicon and Intel Macs.
+
+The app is not notarized by Apple yet, so the first launch is blocked with a warning that Apple
+could not verify it. To open it anyway:
+
+1. Try to open KachraClean once and dismiss the warning.
+2. Open **System Settings → Privacy & Security**, scroll down, and click **Open Anyway** next to
+   KachraClean.
+
+Or, from Terminal: `xattr -dr com.apple.quarantine /Applications/KachraClean.app`
+
+## Build the app yourself
 
 ```bash
 ./scripts/build-app.sh      # builds build/KachraClean.app (no Xcode needed)
 open build/KachraClean.app
+
+UNIVERSAL=1 ./scripts/build-app.sh && ./scripts/make-dmg.sh   # release disk image
 ```
 
 Grant **KachraClean** Full Disk Access when the banner asks. Safe items are pre-selected. Nothing
