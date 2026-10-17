@@ -62,3 +62,4 @@
 - Trace: 28 s, ~161k ops, no usage-database reads, Spotlight daemons active → consistent with a Spotlight metadata query.
 - This answered the biggest open question without reading a line of the app's code: observation + a hypothesis + checking it against OS metadata.
 - Spec: `docs/spec/05-apps-unused-uninstaller.md`.
+- Confirmation: the agent predicted the 4 "unused" apps from the date rule before seeing the filter; the user opened the Unused filter and it listed exactly those 4. A predict-then-verify loop is the strongest evidence a black-box study can produce.

@@ -20,9 +20,10 @@ Compared against `mdls` for 12 apps:
 - When Spotlight has `kMDItemLastUsedDate`, the displayed date equals it (2/2 apps).
 - When it doesn't, the displayed date equals the **bundle's modification date** (10/10 apps).
 
-## What "unused" means (inferred, medium confidence)
-"Unused" count = 4, which matches exactly the apps whose displayed date is older than ~6 months
-(the next-oldest app is just inside the 6-month line). To confirm by viewing the Unused filter.
+## What "unused" means (prediction confirmed)
+We predicted, from the dates alone, that "unused" = displayed date older than ~6 months, and named the
+4 apps in advance. The Unused filter then listed exactly those 4 apps (the next-oldest app, 1 day inside
+the 6-month line, was not included). The exact cutoff (180 days vs 6 calendar months) is not pinned down.
 
 ## Weakness we can fix
 Spotlight's last-used date is only set for some launch paths; many daily-used apps on this Mac had
