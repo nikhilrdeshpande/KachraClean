@@ -44,6 +44,22 @@ public struct Cleaner: Sendable {
         return outcomes
     }
 
+    /// Puts trashed items back where they came from (Undo). Returns the outcomes that were restored.
+    @discardableResult
+    public func restore(_ outcomes: [Outcome]) -> [Outcome] {
+        let fm = FileManager()
+        var restored: [Outcome] = []
+        for outcome in outcomes {
+            guard let trashed = outcome.trashedTo, !fm.fileExists(atPath: outcome.path) else { continue }
+            let original = URL(fileURLWithPath: outcome.path)
+            try? fm.createDirectory(at: original.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if (try? fm.moveItem(at: URL(fileURLWithPath: trashed), to: original)) != nil {
+                restored.append(outcome)
+            }
+        }
+        return restored
+    }
+
     /// Why a path must not be touched, or nil if it may go to the Trash.
     public func refusal(for url: URL, category: Category) -> String? {
         let path = url.standardizedFileURL.resolvingSymlinksInPath().path

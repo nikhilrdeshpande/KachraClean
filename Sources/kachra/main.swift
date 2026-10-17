@@ -90,8 +90,10 @@ case "scan":
     let only = args.list("only").compactMap(Category.init(rawValue:))
     if !only.isEmpty { options.categories = Set(only) }
     let json = args.flags.contains("json")
-    let report = try await Scanner(options: options).run { step in
-        if !json { FileHandle.standardError.write(Data("scanning \(step)…\n".utf8)) }
+    let report = try await Scanner(options: options).run { event in
+        if !json, case .started(let step) = event {
+            FileHandle.standardError.write(Data("scanning \(step.rawValue)…\n".utf8))
+        }
     }
     // Only a full scan replaces the saved report that `clean` and the app work from.
     if only.isEmpty { try report.save(to: ScanReport.defaultLocation) }

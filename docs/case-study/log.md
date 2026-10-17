@@ -84,3 +84,18 @@
 - No Xcode: `scripts/build-app.sh` assembles `KachraClean.app` from the SwiftPM build (Info.plist, resource bundle in Contents/Resources, ad-hoc signature). Rules loading checks the app's Resources folder before SwiftPM's `Bundle.module`, which would otherwise crash inside a hand-built bundle.
 - Gotcha: `Category` collides with the Objective-C runtime's `Category` type in an AppKit/SwiftUI target; solved with a module-level typealias.
 - Screenshot review caught three UX bugs (a partial CLI scan overwriting the app's report, no pre-selection after reload, a truncated sidebar label), all fixed.
+
+## 2026-10-17 — UX redesign (research-led)
+Research inputs and what each changed:
+- Disk-browser usability studies (Stasko et al.; Woodburn et al. 2019): sunbursts convey hierarchy better than treemaps on first use, and tiny outer slices need consolidating → interactive two-ring **space map** (categories → biggest items, small items merged, hover explains, click opens).
+- Undo-vs-confirm guidance: blanket confirmations get clicked through; reversible actions should offer Undo → moving to the Trash happens immediately with an **Undo** toast (⌘Z, restores from the Trash); only removing apps asks first.
+- Mole's design notes (calm, stable layouts; visible plan before deletion; independent path validation) → fixed-layout scanning screen with a step checklist; engine-level path guards stay separate from the UI.
+- Criticism of Apple's Storage pane (unexplained "System Data", numbers that keep changing) → every item carries a reason and evidence; results appear only when final.
+- WWDC25 Liquid Glass → floating glass action bar and glass buttons on macOS 26, material fallback on 14–15.
+- What we observed in the reference app → one primary action on the results screen, "review" one click away.
+
+Implementation notes / bugs found by screenshot review:
+- Duplicate primary actions on the home screen → one selection concept; the hero button cleans the selection.
+- Sidebar and inspector clipped at narrower windows. Root cause (after several wrong guesses): SwiftUI's `.inspector` asks the window to grow toward the screen edge and lays content out at that width when the window can't. Replaced with an in-column details panel. (Stale autosaved split-view widths from earlier builds also contributed while debugging.)
+- `Category` and `Scanner` collide with Objective-C runtime / Foundation types in an AppKit target → module typealiases.
+- **Without Full Disk Access, macOS blocks `open()` on some folders until the user answers a consent prompt**, which froze a scan step for minutes (found by sampling the process: threads parked in `__open`). Fix: a permission sheet before scanning that auto-continues once access is granted, plus a limited mode that skips other apps' containers and macOS system caches.

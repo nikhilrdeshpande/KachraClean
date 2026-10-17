@@ -54,6 +54,13 @@ enum PathUtil {
         return p.hasPrefix(home.path + "/") ? "~" + p.dropFirst(home.path.count) : p
     }
 
+    /// Other apps' containers: reading them without Full Disk Access triggers a macOS consent prompt.
+    static func isProtected(_ url: URL, home: URL) -> Bool {
+        let p = url.path
+        return p.hasPrefix(home.appendingPathComponent("Library/Containers").path + "/")
+            || p.hasPrefix(home.appendingPathComponent("Library/Group Containers").path + "/")
+    }
+
     static func exists(_ url: URL) -> Bool {
         FileManager().fileExists(atPath: url.path)
     }

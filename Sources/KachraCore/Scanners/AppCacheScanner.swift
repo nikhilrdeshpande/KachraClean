@@ -6,6 +6,7 @@ import Foundation
 struct AppCacheScanner {
     let home: URL
     let claimed: Set<String>
+    var avoidProtected = false
 
     func scan() async -> [Finding] {
         let roots: [(URL, Category)] = [
@@ -17,6 +18,7 @@ struct AppCacheScanner {
             for child in children(of: root) {
                 // Skip claimed paths, and folders that contain a claimed path (sized separately).
                 if claimed.contains(child.path) { continue }
+                if avoidProtected, child.lastPathComponent.hasPrefix("com.apple.") { continue }
                 if claimed.contains(where: { $0.hasPrefix(child.path + "/") }) {
                     candidates += children(of: child)
                         .filter { !claimed.contains($0.path) }

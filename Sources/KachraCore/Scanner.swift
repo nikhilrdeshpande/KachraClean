@@ -9,6 +9,9 @@ public struct Scanner: Sendable {
         public var downloads: URL
         public var idleDays: Int
         public var unusedAppDays: Int
+        /// Without Full Disk Access, opening some folders makes macOS show a consent prompt and
+        /// blocks the scan until it's answered. Limited mode skips those locations.
+        public var avoidProtectedLocations: Bool
 
         public init(
             categories: Set<Category> = Set(Category.allCases),
@@ -16,6 +19,7 @@ public struct Scanner: Sendable {
             downloads: URL? = nil,
             idleDays: Int = 30,
             unusedAppDays: Int = 180,
+            avoidProtectedLocations: Bool = false,
             home: URL = FileManager.default.homeDirectoryForCurrentUser
         ) {
             self.categories = categories
@@ -23,6 +27,7 @@ public struct Scanner: Sendable {
             self.downloads = downloads ?? home.appendingPathComponent("Downloads")
             self.idleDays = idleDays
             self.unusedAppDays = unusedAppDays
+            self.avoidProtectedLocations = avoidProtectedLocations
         }
     }
 
@@ -34,40 +39,82 @@ public struct Scanner: Sendable {
         self.home = home
     }
 
-    public func run(progress: (@Sendable (String) -> Void)? = nil) async throws -> ScanReport {
+    public enum Step: String, Sendable, CaseIterable {
+        case knownLocations = "known locations"
+        case appCaches = "app caches"
+        case projects = "projects"
+        case duplicates = "duplicates"
+        case apps = "apps"
+
+        public var title: String {
+            switch self {
+            case .knownLocations: "Developer tools, models & logs"
+            case .appCaches: "App caches"
+            case .projects: "Code projects"
+            case .duplicates: "Duplicate downloads"
+            case .apps: "Applications"
+            }
+        }
+    }
+
+    public enum Progress: Sendable {
+        case started(Step)
+        case finished(Step, found: Int64)
+    }
+
+    /// Steps that will run for the current options, in order.
+    public var plannedSteps: [Step] {
+        let wanted = options.categories
+        var steps: [Step] = []
+        if !wanted.isDisjoint(with: [.toolCaches, .models, .logs, .trash]) { steps.append(.knownLocations) }
+        if !wanted.isDisjoint(with: [.appCaches, .toolCaches]) { steps.append(.appCaches) }
+        if wanted.contains(.projectArtifacts) { steps.append(.projects) }
+        if wanted.contains(.duplicates) { steps.append(.duplicates) }
+        if wanted.contains(.apps) { steps.append(.apps) }
+        return steps
+    }
+
+    public func run(progress: (@Sendable (Progress) -> Void)? = nil) async throws -> ScanReport {
         let rules = try RuleSet.bundled()
         let wanted = options.categories
         var findings: [Finding] = []
         var timings: [String: Double] = [:]
 
-        func timed(_ name: String, _ work: () async -> [Finding]) async {
-            progress?(name)
+        func timed(_ step: Step, _ work: () async -> [Finding]) async {
+            guard !Task.isCancelled else { return }
+            progress?(.started(step))
             let start = Date()
-            findings += await work()
-            timings[name] = Date().timeIntervalSince(start)
+            let found = await work()
+            findings += found
+            timings[step.rawValue] = Date().timeIntervalSince(start)
+            let counted = found.filter { $0.category != .apps && $0.category != .trash }
+            progress?(.finished(step, found: counted.reduce(0) { $0 + $1.bytes }))
         }
 
         if !wanted.isDisjoint(with: [.toolCaches, .models, .logs, .trash]) {
-            await timed("known locations") { await RuleScanner(rules: rules, home: home).scan() }
+            await timed(.knownLocations) { await RuleScanner(rules: rules, home: home, avoidProtected: options.avoidProtectedLocations).scan() }
         }
         if !wanted.isDisjoint(with: [.appCaches, .toolCaches]) {
-            await timed("app caches") {
-                await AppCacheScanner(home: home, claimed: rules.claimedPaths(home: home)).scan()
+            await timed(.appCaches) {
+                await AppCacheScanner(home: home, claimed: rules.claimedPaths(home: home),
+                                avoidProtected: options.avoidProtectedLocations).scan()
             }
         }
         if wanted.contains(.projectArtifacts) {
-            await timed("projects") {
+            await timed(.projects) {
                 await ProjectScanner(options: .init(roots: options.projectRoots, idleDays: options.idleDays),
                                      home: home).scan()
             }
         }
         if wanted.contains(.duplicates) {
-            await timed("duplicates") { await DuplicateScanner(roots: [options.downloads]).scan() }
+            await timed(.duplicates) { await DuplicateScanner(roots: [options.downloads]).scan() }
         }
         if wanted.contains(.apps) {
-            await timed("apps") { await AppScanner(home: home, unusedDays: options.unusedAppDays).scan() }
+            await timed(.apps) { await AppScanner(home: home, unusedDays: options.unusedAppDays,
+                                 avoidProtected: options.avoidProtectedLocations).scan() }
         }
 
+        try Task.checkCancellation()
         findings = findings
             .filter { wanted.contains($0.category) }
             .sorted { $0.bytes > $1.bytes }

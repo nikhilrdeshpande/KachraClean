@@ -21,7 +21,10 @@ public enum DiskUsage {
             errorHandler: { _, _ in true }
         )
         var total: Int64 = 0
+        var visited = 0
         while let item = enumerator?.nextObject() as? URL {
+            visited += 1
+            if visited % 4_096 == 0, Task.isCancelled { break }
             guard let v = try? item.resourceValues(forKeys: Set(keys)), v.isDirectory != true else { continue }
             total += fileSize(v)
         }

@@ -4,6 +4,7 @@ import Foundation
 struct RuleScanner {
     let rules: RuleSet
     let home: URL
+    var avoidProtected = false
 
     func scan() async -> [Finding] {
         var targets: [(rule: Rule, url: URL)] = []
@@ -11,6 +12,7 @@ struct RuleScanner {
             for path in rule.paths {
                 let url = PathUtil.expand(path, home: home)
                 guard PathUtil.exists(url) else { continue }
+                if avoidProtected, PathUtil.isProtected(url, home: home) { continue }
                 if rule.expandChildren == true {
                     let children = (try? FileManager().contentsOfDirectory(
                         at: url, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]

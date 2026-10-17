@@ -157,6 +157,20 @@ let longAgo = Date().addingTimeInterval(-200 * 86_400)
     }
 }
 
+@Suite struct UndoTests {
+    @Test func restoreMovesItemsBack() throws {
+        let box = try Sandbox()
+        let original = try box.file("Library/Caches/app/blob")
+        let parked = try box.file("Parked/blob")
+        try FileManager.default.removeItem(at: original)
+        let outcome = Cleaner.Outcome(findingID: "x", path: original.path, trashedTo: parked.path, error: nil)
+        let restored = Cleaner(home: box.root).restore([outcome])
+        #expect(restored.count == 1)
+        #expect(FileManager.default.fileExists(atPath: original.path))
+        #expect(!FileManager.default.fileExists(atPath: parked.path))
+    }
+}
+
 @Suite struct RuleTests {
     @Test func bundledRulesLoadAndAreWellFormed() throws {
         let rules = try RuleSet.bundled()

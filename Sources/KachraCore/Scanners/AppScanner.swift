@@ -15,10 +15,13 @@ public struct AppScanner: Sendable {
 
     public var home: URL
     public var unusedDays: Int
+    public var avoidProtected: Bool
 
-    public init(home: URL = FileManager.default.homeDirectoryForCurrentUser, unusedDays: Int = 180) {
+    public init(home: URL = FileManager.default.homeDirectoryForCurrentUser, unusedDays: Int = 180,
+                avoidProtected: Bool = false) {
         self.home = home
         self.unusedDays = unusedDays
+        self.avoidProtected = avoidProtected
     }
 
     struct AppInfo: Sendable {
@@ -61,8 +64,8 @@ public struct AppScanner: Sendable {
             case .runningNow:
                 return ("Running right now.", Date(), false)
             case .noData(let installed):
-                let when = installed.map { "; installed or updated \(df.string(from: $0))" } ?? ""
-                return ("No usage recorded by macOS\(when). This doesn't mean it's unused.", nil, false)
+                let when = installed.map { " · updated \(df.string(from: $0))" } ?? ""
+                return ("No usage data from macOS\(when)", nil, false)
             }
         }()
         var details = ["bundle": PathUtil.display(app.url, home: home),
@@ -78,7 +81,7 @@ public struct AppScanner: Sendable {
             safety: .risky,
             reason: unused
                 ? "Not opened in over \(unusedDays) days. \(evidence) Removing it also removes its settings and data."
-                : evidence,
+                : (lastActivity == nil ? evidence + ". macOS only records some ways of opening apps, so this doesn't mean it's unused." : evidence),
             lastActivity: lastActivity,
             details: details
         )
@@ -140,9 +143,10 @@ public struct AppScanner: Sendable {
             lib.appendingPathComponent("Logs/\(app.name)"),
         ]
         // Group containers are prefixed with a team ID: <TEAMID>.<id> or <TEAMID>.group.<id>.
-        let groups = (try? FileManager().contentsOfDirectory(atPath: lib.appendingPathComponent("Group Containers").path)) ?? []
+        let groups = avoidProtected ? [] : (try? FileManager().contentsOfDirectory(atPath: lib.appendingPathComponent("Group Containers").path)) ?? []
         candidates += groups.filter { $0.hasSuffix(".\(id)") }
             .map { lib.appendingPathComponent("Group Containers/\($0)") }
+        if avoidProtected { candidates.removeAll { PathUtil.isProtected($0, home: home) } }
         return Array(Set(candidates.filter(PathUtil.exists)))
     }
 }

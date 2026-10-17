@@ -99,7 +99,13 @@ public struct ProjectScanner: Sendable {
 
     func finding(for hit: Hit, bytes: Int64, project: ProjectInfo) -> Finding {
         let idle = project.idleDays.map { $0 >= options.idleDays } ?? true
-        let ago = project.idleDays.map { "\($0) days ago" } ?? "unknown"
+        let ago = project.idleDays.map { days -> String in
+            switch days {
+            case 0: "today"
+            case 1: "yesterday"
+            default: "\(days) days ago"
+            }
+        } ?? "an unknown time ago"
         var details = ["project": PathUtil.display(hit.project, home: home), "kind": hit.kind.rawValue,
                        "lastActivity": ago]
         if let lock = project.lockfile { details["lockfile"] = lock }
@@ -110,18 +116,18 @@ public struct ProjectScanner: Sendable {
         case .nodeModules:
             switch (project.lockfile, idle) {
             case (let lock?, true):
-                (safety, reason) = (.safe, "Project idle since \(ago). Restore exactly from \(lock) with \(project.installCommand).")
+                (safety, reason) = (.safe, "Project last touched \(ago). Restore exactly from \(lock) with \(project.installCommand).")
             case (let lock?, false):
-                (safety, reason) = (.review, "Project active \(ago). Restorable from \(lock), but you'd need to reinstall before working on it.")
+                (safety, reason) = (.review, "Project in use (last touched \(ago)). Restorable from \(lock), but you'd need to reinstall before working on it.")
             case (nil, _):
                 (safety, reason) = (.review, "No lockfile, so a reinstall may resolve different package versions.")
             }
         case .pythonEnv:
             switch (project.pythonManifest, idle) {
             case (let manifest?, true):
-                (safety, reason) = (.safe, "Project idle since \(ago). Recreate the environment from \(manifest).")
+                (safety, reason) = (.safe, "Project last touched \(ago). Recreate the environment from \(manifest).")
             case (let manifest?, false):
-                (safety, reason) = (.review, "Project active \(ago). Recreatable from \(manifest), but you'd need to reinstall first.")
+                (safety, reason) = (.review, "Project in use (last touched \(ago)). Recreatable from \(manifest), but you'd need to reinstall first.")
             case (nil, _):
                 (safety, reason) = (.review, "No requirements or lock file found; packages may have been installed by hand.")
             }
@@ -129,11 +135,11 @@ public struct ProjectScanner: Sendable {
             (safety, reason) = (.safe, "Build output and caches. Regenerated on the next build or dev-server start.")
         case .rustTarget:
             (safety, reason) = idle
-                ? (.safe, "Project idle since \(ago). Cargo rebuilds this on the next build.")
-                : (.review, "Project active \(ago). Cargo rebuilds this, but a full rebuild can take a while.")
+                ? (.safe, "Project last touched \(ago). Cargo rebuilds this on the next build.")
+                : (.review, "Project in use (last touched \(ago)). Cargo rebuilds this, but a full rebuild can take a while.")
         case .pods:
             (safety, reason) = project.lockfile != nil && idle
-                ? (.safe, "Project idle since \(ago). Restore with `pod install` from Podfile.lock.")
+                ? (.safe, "Project last touched \(ago). Restore with `pod install` from Podfile.lock.")
                 : (.review, "Restore with `pod install`; check the project still builds afterwards.")
         case .pycache:
             (safety, reason) = (.safe, "Compiled .pyc files. Python regenerates them automatically.")
@@ -145,7 +151,7 @@ public struct ProjectScanner: Sendable {
         let name = atRoot ? hit.url.lastPathComponent : hit.project.lastPathComponent
         return Finding(
             category: .projectArtifacts,
-            title: "\(name) · \(hit.kind.rawValue)",
+            title: atRoot ? name : "\(name) · \(hit.url.lastPathComponent)",
             owner: name,
             paths: [hit.url.path],
             bytes: bytes,
@@ -199,7 +205,7 @@ public struct ProjectScanner: Sendable {
 
     /// Walks a directory that is known not to be an artifact itself.
     private func walk(_ url: URL, depth: Int) -> [Hit] {
-        guard depth < options.maxDepth else { return [] }
+        guard depth < options.maxDepth, !Task.isCancelled else { return [] }
         let children = (try? FileManager().contentsOfDirectory(
             at: url, includingPropertiesForKeys: Self.walkKeys, options: []
         )) ?? []

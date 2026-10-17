@@ -1,0 +1,195 @@
+import KachraCore
+import SwiftUI
+
+struct SafetyBadge: View {
+    var safety: Safety
+
+    var body: some View {
+        Label(safety.label, systemImage: safety.symbol)
+            .labelStyle(.titleAndIcon)
+            .font(.caption.weight(.semibold))
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .foregroundStyle(safety.color)
+            .background(safety.color.opacity(0.13), in: Capsule())
+            .help(safety.explanation)
+    }
+}
+
+/// Horizontal bar split by safety level, for a category's composition.
+struct SafetySplitBar: View {
+    var safe: Int64
+    var review: Int64
+    var risky: Int64
+    var height: CGFloat = 6
+
+    var body: some View {
+        let total = max(Double(safe + review + risky), 1)
+        GeometryReader { geo in
+            HStack(spacing: 1.5) {
+                ForEach([(safe, Safety.safe), (review, .review), (risky, .risky)], id: \.1) { bytes, safety in
+                    if bytes > 0 {
+                        Capsule().fill(safety.color.gradient)
+                            .frame(width: max(height, geo.size.width * Double(bytes) / total))
+                    }
+                }
+            }
+        }
+        .frame(height: height)
+        .accessibilityElement()
+        .accessibilityLabel("Safe \(Format.bytes(safe)), review \(Format.bytes(review)), careful \(Format.bytes(risky))")
+    }
+}
+
+/// Floating action bar: what's selected and the one button that cleans it.
+struct ActionBar: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        HStack(spacing: 14) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(model.selection.isEmpty ? "Nothing selected" : "\(Format.bytes(model.selectedBytes)) selected")
+                    .font(.headline)
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+                Group {
+                    if model.selectedNeedingReview > 0 {
+                        Label("\(model.selection.count) items · \(model.selectedNeedingReview) marked review",
+                              systemImage: "eye.fill")
+                            .foregroundStyle(.orange)
+                    } else {
+                        Text("\(model.selection.count) items · all safe · moves to Trash, undoable")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .font(.caption)
+            }
+            Spacer(minLength: 20)
+            if model.phase == .cleaning { ProgressView().controlSize(.small) }
+            Button {
+                model.cleanSelection()
+            } label: {
+                Label("Move to Trash", systemImage: "trash")
+                    .padding(.horizontal, 6)
+            }
+            .controlSize(.large)
+            .prominentGlassButton()
+            .keyboardShortcut(.delete, modifiers: .command)
+            .disabled(model.selection.isEmpty || model.phase != .ready)
+        }
+        .padding(.leading, 20)
+        .padding(.trailing, 10)
+        .padding(.vertical, 10)
+        .glassSurface(in: Capsule())
+        .shadow(color: .black.opacity(0.12), radius: 16, y: 6)
+        .frame(maxWidth: 640)
+        .padding(.bottom, 16)
+        .padding(.horizontal, 24)
+    }
+}
+
+/// Transient message with Undo, shown after cleaning.
+struct ToastView: View {
+    @Environment(AppModel.self) private var model
+    var toast: AppModel.Toast
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.title3)
+            Text(toast.message).font(.callout.weight(.medium))
+            if toast.canUndo {
+                Button("Undo") { model.undoLastClean() }
+                    .keyboardShortcut("z")
+                    .glassButton()
+                Button("Open Trash") { model.openTrash() }
+                    .buttonStyle(.borderless)
+            }
+            Button {
+                model.dismissToast()
+            } label: {
+                Image(systemName: "xmark").font(.caption.weight(.bold))
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
+            .accessibilityLabel("Dismiss")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .glassSurface(in: Capsule())
+        .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
+        .padding(.top, 12)
+    }
+}
+
+struct FullDiskAccessBanner: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "lock.shield.fill").font(.title2).foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Give KachraClean Full Disk Access").font(.headline)
+                Text("Without it, macOS hides other apps' containers and some caches, so results are incomplete. KachraClean still only reads during a scan.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+            Button("Open Settings") { model.openFullDiskAccessSettings() }.glassButton()
+            Button("Check Again") { model.recheckFullDiskAccess() }.buttonStyle(.borderless)
+        }
+        .padding(14)
+        .glassSurface(in: RoundedRectangle(cornerRadius: 14))
+    }
+}
+
+/// Shown before scanning without Full Disk Access. Without it, macOS can pause the scan with
+/// consent prompts for other apps' data, so we explain, offer the fix, and offer a limited scan.
+struct PermissionGate: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(spacing: 14) {
+                Image(systemName: "lock.shield.fill").font(.system(size: 40)).foregroundStyle(.indigo.gradient)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Let KachraClean see your whole disk").font(.title2.bold())
+                    Text("macOS hides other apps' caches and data unless you grant Full Disk Access.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            VStack(alignment: .leading, spacing: 12) {
+                step(1, "Click **Open Settings** below.")
+                step(2, "Turn on **KachraClean** in the list. If it isn't there, click + and choose the app.")
+                step(3, "Come back here. The scan starts by itself.")
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 12))
+            Label("KachraClean only reads during a scan. Nothing leaves your Mac.", systemImage: "eye")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            HStack {
+                Button("Scan Without It") { model.scan() }
+                    .help("Skips other apps' containers and macOS caches, so results are smaller.")
+                Spacer()
+                Button("Cancel", role: .cancel) { model.showPermissionGate = false }
+                Button("Open Settings") { model.openFullDiskAccessSettings() }
+                    .keyboardShortcut(.defaultAction)
+                    .prominentGlassButton()
+            }
+        }
+        .padding(24)
+        .frame(width: 520)
+    }
+
+    private func step(_ n: Int, _ text: LocalizedStringKey) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text("\(n)")
+                .font(.callout.weight(.bold))
+                .frame(width: 22, height: 22)
+                .background(.indigo.opacity(0.2), in: Circle())
+            Text(text)
+        }
+    }
+}
