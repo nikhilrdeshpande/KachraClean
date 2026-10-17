@@ -6,7 +6,7 @@ measurement with public Apple APIs on the same Mac, minutes apart.
 ## Observed (reference app)
 Smart scan proposed two pre-selected maintenance tasks:
 1. Flush the DNS cache.
-2. Free up purgeable space, labelled "up to 2.7 GB".
+2. Free up purgeable space, with an estimate of up to 2.7 GB.
 (Other performance features — login items, background items — exist as separate modules but produced
 no smart-scan task on this Mac.)
 
@@ -20,7 +20,7 @@ no smart-scan task on this Mac.)
 | `volumeAvailableCapacityForOpportunisticUsage` | 21.99 GB |
 | important − free | **2.74 GB** |
 
-`important − free` matches the reference app's "up to 2.7 GB". **Inferred:** the purgeable estimate is
+`important − free` matches the reference app's 2.7 GB estimate. **Inferred:** the purgeable estimate is
 this public-API difference. Local Time Machine snapshots: none on this Mac, so snapshots are not part
 of this figure here.
 

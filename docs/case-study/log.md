@@ -34,7 +34,7 @@
 - `open_binary` cannot select the macOS-utilities provider explicitly (only ghidra/hopper/ida). With auto-selection it opened the app with **no deep provider bound**: Ghidra v1 refuses universal Mach-O binaries ("analyze a thinned slice instead"), Hopper/IDA absent. `binary_session` confirmed `analysis_provider_binding: null`; all disassembly/decompile tools reported `provider_missing`. So the clean-room boundary held by construction.
 - `observe_native_ui` first needed Accessibility permission for Terminal (granted by the user), then still failed: **REA bug found** — REA compiles its Swift UI helper from scratch on every call with a fresh module cache and a 60 s timeout; on macOS 26 SDK that cold compile takes ~66 s here, so the call always times out. (To report upstream: `dist/native/NativeUiHelperRuntime.js`, `timeout: 60_000`.)
 - Workaround: compiled REA's own helper source with REA's exact `swiftc` invocation and ran it with the same request JSON. Capture took 1.3 s: 97 accessibility nodes + window screenshot.
-- Observed Smart Care summary: Cleanup "17.6 GB of junk"; Protection "No threats"; Performance "2 tasks"; Applications "1 vital update"; My Clutter "53 duplicate downloads". Sidebar modules: Smart Care, Cleanup, Protection, Performance, Applications, My Clutter, Space Lens, Cloud Cleanup, My Tools, My Activity.
+- Observed summary (paraphrased): cleanup 17.6 GB; malware none; performance 2 tasks; applications 1 update; clutter 53 duplicate downloads. Sidebar modules (feature areas): smart scan, cleanup, protection, performance, applications, clutter, disk map, cloud cleanup, tools, activity.
 - Tried to click "Review" (navigation only) through a guarded wrapper (fresh re-capture, exact-label checks, forbidden words like Run/Clean/Remove). **Blocked by auto mode as "auto-mode bypass"**: the approval covered reading the window, not driving it. Decision: the human clicks, the agent observes.
 
 ## 2026-10-17 — Cleanup review screen (human clicks, agent reads)
@@ -51,7 +51,7 @@
 - Spec: `docs/spec/03-clutter-duplicates.md`.
 
 ## 2026-10-17 — Performance review screen + purgeable space
-- Observed two maintenance tasks: DNS cache flush and "free up purgeable space (up to 2.7 GB)".
+- Observed two maintenance tasks: DNS cache flush and freeing purgeable space (estimated at up to 2.7 GB).
 - Our check with public `URLResourceValues`: important-usage capacity − free capacity = 2.74 GB → matches. The reference figure is reproducible with public API; no private framework needed for the *estimate*.
 - Investigated a ~19 GiB free-space drop during the session: caused by the user's own ML downloads, not by the analysis or the reference app.
 - Spec: `docs/spec/04-maintenance-purgeable.md`.
