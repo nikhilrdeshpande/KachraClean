@@ -49,3 +49,9 @@
 - Observed: duplicate detection scoped to Downloads; 53 copies / 157 MB pre-selected; one copy per group kept.
 - Checked the keep rule against file metadata (birth time, Spotlight date-added, last-used) for one group: kept copy was not the oldest; consistent with "first path in sort order". Recorded as low-confidence inference.
 - Spec: `docs/spec/03-clutter-duplicates.md`.
+
+## 2026-10-17 — Performance review screen + purgeable space
+- Observed two maintenance tasks: DNS cache flush and "free up purgeable space (up to 2.7 GB)".
+- Our check with public `URLResourceValues`: important-usage capacity − free capacity = 2.74 GB → matches. The reference figure is reproducible with public API; no private framework needed for the *estimate*.
+- Investigated a ~19 GiB free-space drop during the session: caused by the user's own ML downloads, not by the analysis or the reference app.
+- Spec: `docs/spec/04-maintenance-purgeable.md`.
