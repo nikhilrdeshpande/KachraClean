@@ -36,7 +36,7 @@ public enum Category: String, Codable, Sendable, CaseIterable {
         case .logs: "Logs"
         case .toolCaches: "Developer tool caches"
         case .models: "AI models"
-        case .projectArtifacts: "Project dependencies & builds"
+        case .projectArtifacts: "Project dependencies"
         case .duplicates: "Duplicate downloads"
         case .apps: "Applications"
         case .trash: "Trash"

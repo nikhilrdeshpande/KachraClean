@@ -29,6 +29,16 @@ Safety comes first:
 > Status: early development. The research phase is complete (see `docs/spec/`). Implementation has
 > just started.
 
+## Try the app
+
+```bash
+./scripts/build-app.sh      # builds build/KachraClean.app (no Xcode needed)
+open build/KachraClean.app
+```
+
+Grant **KachraClean** Full Disk Access when the banner asks. Safe items are pre-selected. Nothing
+moves until you press **Move to Trash…** and confirm, and you can always restore items from the Trash.
+
 ## Try it (command line)
 
 You need macOS 14 or later and Swift 6. The Xcode Command Line Tools are enough.

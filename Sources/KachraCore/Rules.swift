@@ -20,10 +20,19 @@ public struct RuleSet: Codable, Sendable {
 
     /// The rules shipped with KachraClean (`Resources/rules.json`).
     public static func bundled() throws -> RuleSet {
-        guard let url = Bundle.module.url(forResource: "rules", withExtension: "json") else {
-            throw CocoaError(.fileNoSuchFile)
-        }
+        guard let url = bundledURL() else { throw CocoaError(.fileNoSuchFile) }
         return try JSONDecoder().decode(RuleSet.self, from: Data(contentsOf: url))
+    }
+
+    /// Inside the packaged .app the resource bundle sits in Contents/Resources, where SwiftPM's
+    /// `Bundle.module` doesn't look (and would crash if missing), so check there first.
+    static func bundledURL() -> URL? {
+        if let resources = Bundle.main.resourceURL,
+           let inApp = Bundle(url: resources.appendingPathComponent("KachraClean_KachraCore.bundle")),
+           let url = inApp.url(forResource: "rules", withExtension: "json") {
+            return url
+        }
+        return Bundle.module.url(forResource: "rules", withExtension: "json")
     }
 
     /// Every path claimed by a rule, expanded. Other scanners skip these to avoid double counting.

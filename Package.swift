@@ -17,6 +17,10 @@ let package = Package(
             name: "kachra",
             dependencies: ["KachraCore"]
         ),
+        .executableTarget(
+            name: "KachraCleanApp",
+            dependencies: ["KachraCore"]
+        ),
         .testTarget(
             name: "KachraCoreTests",
             dependencies: ["KachraCore"]

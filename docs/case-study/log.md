@@ -78,3 +78,9 @@
 | Purgeable estimate | 2.7 GB | 2.76 GB |
 
 - Two bugs found by looking at real output, then fixed: an environment folder directly in the home folder was named after the user account; a datasets cache was marked safe instead of review.
+
+## 2026-10-17 — SwiftUI app
+- `KachraCleanApp` target on top of `KachraCore`: overview (reclaimable headline, disk bar, safe / review / purgeable tiles, per-category breakdown), category review lists with safety badge, reason, evidence and paths, Show in Finder, select-by-safety menu, confirmation before Move to Trash, and a Full Disk Access banner.
+- No Xcode: `scripts/build-app.sh` assembles `KachraClean.app` from the SwiftPM build (Info.plist, resource bundle in Contents/Resources, ad-hoc signature). Rules loading checks the app's Resources folder before SwiftPM's `Bundle.module`, which would otherwise crash inside a hand-built bundle.
+- Gotcha: `Category` collides with the Objective-C runtime's `Category` type in an AppKit/SwiftUI target; solved with a module-level typealias.
+- Screenshot review caught three UX bugs (a partial CLI scan overwriting the app's report, no pre-selection after reload, a truncated sidebar label), all fixed.

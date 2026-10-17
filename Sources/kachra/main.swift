@@ -93,7 +93,8 @@ case "scan":
     let report = try await Scanner(options: options).run { step in
         if !json { FileHandle.standardError.write(Data("scanning \(step)…\n".utf8)) }
     }
-    try report.save(to: ScanReport.defaultLocation)
+    // Only a full scan replaces the saved report that `clean` and the app work from.
+    if only.isEmpty { try report.save(to: ScanReport.defaultLocation) }
     if json {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
