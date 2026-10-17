@@ -55,3 +55,10 @@
 - Our check with public `URLResourceValues`: important-usage capacity − free capacity = 2.74 GB → matches. The reference figure is reproducible with public API; no private framework needed for the *estimate*.
 - Investigated a ~19 GiB free-space drop during the session: caused by the user's own ML downloads, not by the analysis or the reference app.
 - Spec: `docs/spec/04-maintenance-purgeable.md`.
+
+## 2026-10-17 — Applications: how "unused" is decided
+- User recorded a second trace (`fs_usage` incl. `mds`, `mds_stores`), ran the applications scan, opened the uninstaller review. Agent captured the screen (492 nodes, untruncated).
+- Matched the per-app dates against `mdls`: Spotlight last-used date when present (2/2), else bundle modification date (10/10). Unused count (4) matches a ~6-month cutoff on that date.
+- Trace: 28 s, ~161k ops, no usage-database reads, Spotlight daemons active → consistent with a Spotlight metadata query.
+- This answered the biggest open question without reading a line of the app's code: observation + a hypothesis + checking it against OS metadata.
+- Spec: `docs/spec/05-apps-unused-uninstaller.md`.
