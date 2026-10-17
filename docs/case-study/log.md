@@ -43,3 +43,9 @@
 - Checkbox state is not exposed via accessibility; inferred from the size badges, which sum exactly to the selected total.
 - Our own read-only measurement on the same Mac: ~37.7 GB of project build/dependency folders and ~39 GB in `~/.cache` (mostly ML models), none of which appeared in the cleanup list → the developer-cleanup gap is real and large on this machine.
 - Spec: `docs/spec/02-cleanup-categories.md`.
+
+## 2026-10-17 — Clutter review screen
+- Human clicked My Clutter → Review; agent captured (screenshot 0.3 s; 437-node tree, not truncated).
+- Observed: duplicate detection scoped to Downloads; 53 copies / 157 MB pre-selected; one copy per group kept.
+- Checked the keep rule against file metadata (birth time, Spotlight date-added, last-used) for one group: kept copy was not the oldest; consistent with "first path in sort order". Recorded as low-confidence inference.
+- Spec: `docs/spec/03-clutter-duplicates.md`.
