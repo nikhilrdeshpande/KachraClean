@@ -19,3 +19,12 @@
 - Entitlements (`codesign -d --entitlements`): main app **not sandboxed**; Finder Sync extension sandboxed; app groups include a legacy CleanMyMac4 group; HealthMonitor has network-server + location entitlements.
 - Helper metadata (`launchctl plist __TEXT,__launchd_plist` / `__info_plist`): one Mach service; `SMAuthorizedClients` = main app, Menu, HealthMonitor (team-ID pinned); helper version 5.3.2 vs app 5.7.2.
 - Spec written: `docs/spec/00-reference-architecture.md`.
+
+## 2026-10-17 — First runtime observation: full scan
+- Setup: CleanMyMac launched from `/Applications`, Full Disk Access granted, privileged helper NOT installed. Trace recorded by the user with `sudo fs_usage -w -f pathname CleanMyMac_5 com.macpaw.CleanMyMac5.Agent` (17:31–17:37). The Clean button was never pressed.
+- Tooling notes for the article:
+  - Opening the running app with REA (`open_binary`, provider `native-macos`, to use `observe_native_ui`) was **blocked by Claude Code's auto-mode safety classifier** ("third-party attack"). A follow-up read-only shell command on the trace was also blocked once; the user then explicitly approved trace analysis. Takeaway: agent guardrails treat attaching to someone else's running app as high-risk, and that's sensible; the human has to make the call.
+  - Trace analysis was done with two small Python parsers (kept outside the repo), not REA: REA's process capture launches the target itself and snapshots files, whereas we needed system-wide syscall tracing of an already-running GUI app.
+- Safety check first: all 740 delete/rename events were inside the app's own data, cache and temp directories (including an installer package it expanded into its temp dir and removed). **Zero user files touched.**
+- Findings → `docs/spec/01-scan-behavior.md`: ~2.5 min active scan, 1.34 M metadata-heavy operations on 107 threads; distinct phases (logs/caches → full app-bundle inventory → launch agents/daemons → leftovers → installers → large/old files); developer caches visited only as part of the generic cache walk; no dedicated project-artifact scanner seen; app-usage databases only stat'ed (usage source still unknown).
+- Privacy decision: the raw trace contains personal folder names, so it stays in `~/re-targets/` and the spec generalizes paths.
