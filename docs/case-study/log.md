@@ -36,3 +36,10 @@
 - Workaround: compiled REA's own helper source with REA's exact `swiftc` invocation and ran it with the same request JSON. Capture took 1.3 s: 97 accessibility nodes + window screenshot.
 - Observed Smart Care summary: Cleanup "17.6 GB of junk"; Protection "No threats"; Performance "2 tasks"; Applications "1 vital update"; My Clutter "53 duplicate downloads". Sidebar modules: Smart Care, Cleanup, Protection, Performance, Applications, My Clutter, Space Lens, Cloud Cleanup, My Tools, My Activity.
 - Tried to click "Review" (navigation only) through a guarded wrapper (fresh re-capture, exact-label checks, forbidden words like Run/Clean/Remove). **Blocked by auto mode as "auto-mode bypass"**: the approval covered reading the window, not driving it. Decision: the human clicks, the agent observes.
+
+## 2026-10-17 — Cleanup review screen (human clicks, agent reads)
+- User clicked Cleanup → Review. Full capture (`max_nodes` 4000) timed out at 60 s on the long list; a screenshot-only capture (0.3 s) plus a bounded tree capture (800 nodes, 13 s) worked. Note for REA: a node budget with an early-exit on time would help large native lists.
+- Observed: system junk split into 12 categories; 17.6 GB pre-selected (1,044 items). Pre-selected = caches, logs, localizations, system caches, broken login items. Not pre-selected = architecture stripping (1.8 GB) and document revisions. Caches grouped by owning app, all pre-ticked, including Apple daemon caches.
+- Checkbox state is not exposed via accessibility; inferred from the size badges, which sum exactly to the selected total.
+- Our own read-only measurement on the same Mac: ~37.7 GB of project build/dependency folders and ~39 GB in `~/.cache` (mostly ML models), none of which appeared in the cleanup list → the developer-cleanup gap is real and large on this machine.
+- Spec: `docs/spec/02-cleanup-categories.md`.
