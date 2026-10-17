@@ -67,6 +67,11 @@ struct SettingsView: View {
                 }
                 Text("Only apps with a recorded last-opened date can be called unused.")
                     .font(.caption).foregroundStyle(.secondary)
+                Picker("Large files start at", selection: $model.largeFileMB) {
+                    ForEach([100, 250, 500, 1000, 2000, 5000], id: \.self) { mb in
+                        Text(mb >= 1000 ? "\(mb / 1000) GB" : "\(mb) MB").tag(mb)
+                    }
+                }
             } header: {
                 Text("Thresholds")
             } footer: {

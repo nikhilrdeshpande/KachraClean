@@ -296,7 +296,14 @@ struct CategoryCard: View {
             return "\(items.count) folders in \(projects) projects · \(idle) idle with a lockfile"
         case .models:
             let biggest = items.max { $0.bytes < $1.bytes }
-            return biggest.map { "Largest: \($0.title) (\(Format.bytes($0.bytes)))" } ?? category.blurb
+            let largest = biggest.map { " · largest \($0.title.split(separator: "/").last ?? "") (\(Format.bytes($0.bytes)))" } ?? ""
+            return "\(items.count) models and datasets" + largest
+        case .largeFiles:
+            let kinds = Dictionary(grouping: items) { $0.owner ?? "File" }
+                .sorted { $0.value.count > $1.value.count }
+                .prefix(3)
+                .map { "\($0.value.count) \($0.key.lowercased())\($0.value.count == 1 ? "" : "s")" }
+            return ListFormatter.localizedString(byJoining: kinds)
         case .apps:
             let unused = items.filter { $0.details["unused"] == "yes" }.count
             return unused > 0 ? "\(items.count) apps · \(unused) not opened in \(model.unusedAppDays)+ days"

@@ -9,6 +9,8 @@ public struct Scanner: Sendable {
         public var downloads: URL
         public var idleDays: Int
         public var unusedAppDays: Int
+        /// Files at least this big show up under Large files.
+        public var largeFileBytes: Int64
         /// Without Full Disk Access, opening some folders makes macOS show a consent prompt and
         /// blocks the scan until it's answered. Limited mode skips those locations.
         public var avoidProtectedLocations: Bool
@@ -19,6 +21,7 @@ public struct Scanner: Sendable {
             downloads: URL? = nil,
             idleDays: Int = 30,
             unusedAppDays: Int = 180,
+            largeFileBytes: Int64 = 500_000_000,
             avoidProtectedLocations: Bool = false,
             home: URL = FileManager.default.homeDirectoryForCurrentUser
         ) {
@@ -27,6 +30,7 @@ public struct Scanner: Sendable {
             self.downloads = downloads ?? home.appendingPathComponent("Downloads")
             self.idleDays = idleDays
             self.unusedAppDays = unusedAppDays
+            self.largeFileBytes = largeFileBytes
             self.avoidProtectedLocations = avoidProtectedLocations
         }
     }
@@ -41,17 +45,21 @@ public struct Scanner: Sendable {
 
     public enum Step: String, Sendable, CaseIterable {
         case knownLocations = "known locations"
+        case models = "models"
         case appCaches = "app caches"
         case projects = "projects"
         case duplicates = "duplicates"
+        case largeFiles = "large files"
         case apps = "apps"
 
         public var title: String {
             switch self {
-            case .knownLocations: "Developer tools, models & logs"
+            case .knownLocations: "Developer tools & logs"
+            case .models: "AI models (Hugging Face, Ollama)"
             case .appCaches: "App caches"
             case .projects: "Code projects"
             case .duplicates: "Duplicate downloads"
+            case .largeFiles: "Large files"
             case .apps: "Applications"
             }
         }
@@ -67,9 +75,11 @@ public struct Scanner: Sendable {
         let wanted = options.categories
         var steps: [Step] = []
         if !wanted.isDisjoint(with: [.toolCaches, .models, .logs, .trash]) { steps.append(.knownLocations) }
+        if wanted.contains(.models) { steps.append(.models) }
         if !wanted.isDisjoint(with: [.appCaches, .toolCaches]) { steps.append(.appCaches) }
         if wanted.contains(.projectArtifacts) { steps.append(.projects) }
         if wanted.contains(.duplicates) { steps.append(.duplicates) }
+        if !wanted.isDisjoint(with: [.largeFiles, .models]) { steps.append(.largeFiles) }
         if wanted.contains(.apps) { steps.append(.apps) }
         return steps
     }
@@ -94,9 +104,13 @@ public struct Scanner: Sendable {
         if !wanted.isDisjoint(with: [.toolCaches, .models, .logs, .trash]) {
             await timed(.knownLocations) { await RuleScanner(rules: rules, home: home, avoidProtected: options.avoidProtectedLocations).scan() }
         }
+        let models = ModelScanner(home: home)
+        if wanted.contains(.models) {
+            await timed(.models) { await models.scan() }
+        }
         if !wanted.isDisjoint(with: [.appCaches, .toolCaches]) {
             await timed(.appCaches) {
-                await AppCacheScanner(home: home, claimed: rules.claimedPaths(home: home),
+                await AppCacheScanner(home: home, claimed: rules.claimedPaths(home: home).union(models.claimedPaths),
                                 avoidProtected: options.avoidProtectedLocations).scan()
             }
         }
@@ -109,12 +123,22 @@ public struct Scanner: Sendable {
         if wanted.contains(.duplicates) {
             await timed(.duplicates) { await DuplicateScanner(roots: [options.downloads]).scan() }
         }
+        if !wanted.isDisjoint(with: [.largeFiles, .models]) {
+            let excluded = rules.claimedPaths(home: home).union(models.claimedPaths)
+            await timed(.largeFiles) {
+                await LargeFileScanner(home: home, minimumBytes: options.largeFileBytes, excluded: excluded).scan()
+            }
+        }
         if wanted.contains(.apps) {
             await timed(.apps) { await AppScanner(home: home, unusedDays: options.unusedAppDays,
                                  avoidProtected: options.avoidProtectedLocations).scan() }
         }
 
         try Task.checkCancellation()
+        let elsewhere = findings.filter { $0.category != .largeFiles && $0.category != .apps }.flatMap(\.paths)
+        findings.removeAll { f in
+            f.category == .largeFiles && f.paths.allSatisfy { p in elsewhere.contains { p == $0 || p.hasPrefix($0 + "/") } }
+        }
         findings = findings
             .filter { wanted.contains($0.category) }
             .sorted { $0.bytes > $1.bytes }

@@ -1,4 +1,5 @@
 import KachraCore
+import QuickLook
 import SwiftUI
 
 struct CategoryDetailView: View {
@@ -62,6 +63,13 @@ struct CategoryDetailView: View {
                 }
                 .keyboardShortcut("i", modifiers: [.command, .option])
             }
+        }
+        .quickLookPreview(Bindable(model).previewURL)
+        .background {
+            // Space previews the focused item, like Finder.
+            Button("") { if let f = model.focusedFinding { model.preview(f) } }
+                .keyboardShortcut(.space, modifiers: [])
+                .opacity(0)
         }
         .onChange(of: category) { model.focused = nil }
         // Standard Mac pattern: the inspector follows the selection instead of always taking space.
@@ -155,6 +163,7 @@ struct CategoryDetailView: View {
     private func contextMenu(for finding: Finding) -> some View {
         Button(model.selection.contains(finding.id) ? "Deselect" : "Select") { model.toggle(finding) }
             .disabled(!model.isSelectable(finding))
+        if model.canPreview(finding) { Button("Quick Look") { model.preview(finding) } }
         Button("Show in Finder") { model.reveal(finding) }
         Button("Copy Path") {
             NSPasteboard.general.clearContents()
@@ -273,6 +282,16 @@ struct InspectorView: View {
                         .controlSize(.large)
                         .glassButton()
                         .disabled(!model.isSelectable(f))
+                        if model.canPreview(f) {
+                            Button {
+                                model.preview(f)
+                            } label: {
+                                Label("Quick Look", systemImage: "eye").frame(maxWidth: .infinity)
+                            }
+                            .controlSize(.large)
+                            .glassButton()
+                            .help("Preview (Space)")
+                        }
                         HStack {
                             Button("Show in Finder") { model.reveal(f) }
                             Spacer()
@@ -307,9 +326,10 @@ struct InspectorView: View {
     /// Human-readable evidence, in a sensible order.
     private func facts(_ f: Finding) -> [(String, String)] {
         let labels: [(String, String)] = [
-            ("project", "Project"), ("kind", "Kind"), ("lastActivity", "Last activity"), ("lockfile", "Lockfile"),
+            ("repo", "Repository"), ("project", "Project"), ("kind", "Kind"), ("lastActivity", "Last activity"), ("lockfile", "Lockfile"),
             ("git", "Git repo"), ("usage", "Usage"), ("bundleID", "Bundle ID"), ("copies", "Copies"),
-            ("keep", "Keeping"), ("folders", "Folders"), ("folder", "Folder"),
+            ("keep", "Keeping"), ("folders", "Folders"), ("folder", "Folder"), ("revisions", "Revisions"),
+            ("files", "Files"), ("shared", "Shared"), ("command", "CLI equivalent"),
         ]
         var result = labels.compactMap { key, label in
             f.details[key].map { (label, key == "keep" ? Format.path($0) : $0) }

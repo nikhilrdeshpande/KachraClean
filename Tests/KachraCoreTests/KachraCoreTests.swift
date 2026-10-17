@@ -187,3 +187,43 @@ let longAgo = Date().addingTimeInterval(-200 * 86_400)
         #expect(v.purgeableBytes == 7)
     }
 }
+
+@Suite struct ModelAndLargeFileTests {
+    @Test func huggingFaceSharedBlobsAreAttributedAndKept() async throws {
+        let box = try Sandbox()
+        let hub = box.root.appendingPathComponent(".cache/huggingface/hub")
+        let blobs = hub.appendingPathComponent("blobs")
+        try box.file(".cache/huggingface/hub/blobs/aaa", bytes: 40_960)  // only model A
+        try box.file(".cache/huggingface/hub/blobs/shared", bytes: 8_192)  // A and B
+        try box.file(".cache/huggingface/hub/blobs/orphan", bytes: 4_096)  // nobody
+        let fm = FileManager.default
+        for (repo, files) in [("models--org--a", ["aaa", "shared"]), ("models--org--b", ["shared"])] {
+            let snap = hub.appendingPathComponent("\(repo)/snapshots/rev1")
+            try fm.createDirectory(at: snap, withIntermediateDirectories: true)
+            for f in files {
+                try fm.createSymbolicLink(at: snap.appendingPathComponent(f + ".bin"),
+                                          withDestinationURL: blobs.appendingPathComponent(f))
+            }
+        }
+        let findings = await ModelScanner(home: box.root, environment: [:]).scan()
+        let a = try #require(findings.first { $0.title == "org/a" })
+        #expect(a.paths.contains { $0.hasSuffix("blobs/aaa") })
+        #expect(!a.paths.contains { $0.hasSuffix("blobs/shared") }, "shared blob must be kept")
+        #expect(a.details["shared"] != nil)
+        let orphan = try #require(findings.first { $0.title.contains("Unreferenced") })
+        #expect(orphan.safety == .safe)
+        #expect(orphan.paths.count == 1)
+    }
+
+    @Test func classifiesLargeFileKinds() {
+        #expect(LargeFileScanner.kind(of: URL(fileURLWithPath: "/x/clip.mp4")) == .video)
+        #expect(LargeFileScanner.kind(of: URL(fileURLWithPath: "/x/Installer.dmg")) == .diskImage)
+        #expect(LargeFileScanner.kind(of: URL(fileURLWithPath: "/x/data.parquet")) == .dataset)
+        #expect(LargeFileScanner.kind(of: URL(fileURLWithPath: "/x/w.safetensors")) == .modelWeights)
+        #expect(LargeFileScanner.kind(of: URL(fileURLWithPath: "/x/notes.txt")) == .other)
+        #expect(LargeFileScanner.modelFolder(for: URL(fileURLWithPath: "/m/flux/transformer/0.safetensors"))?.path == "/m/flux")
+        #expect(LargeFileScanner.modelFolder(for: URL(fileURLWithPath: "/c/checkpoints/x.safetensors")) == nil)
+        #expect(LargeFileScanner.displayName(for: URL(fileURLWithPath: "/a/qwen-seed1/model/model.safetensors"))
+            == "qwen-seed1 · model.safetensors")
+    }
+}

@@ -13,6 +13,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN/KachraCleanApp" "$APP/Contents/MacOS/KachraClean"
 cp -R "$BIN/KachraClean_KachraCore.bundle" "$APP/Contents/Resources/"
+if [ -f Assets/AppIcon.icns ]; then cp Assets/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"; fi
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -23,6 +24,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleDisplayName</key><string>KachraClean</string>
   <key>CFBundleIdentifier</key><string>io.github.nikhilrdeshpande.KachraClean</string>
   <key>CFBundleExecutable</key><string>KachraClean</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$VERSION</string>

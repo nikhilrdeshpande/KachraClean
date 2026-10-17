@@ -1,5 +1,6 @@
 import AppKit
 import KachraCore
+import QuickLookThumbnailing
 import SwiftUI
 
 // MARK: - Categories & safety
@@ -11,6 +12,7 @@ extension Category {
         case .logs: "doc.text.fill"
         case .toolCaches: "hammer.fill"
         case .models: "brain.fill"
+        case .largeFiles: "film.stack.fill"
         case .projectArtifacts: "shippingbox.fill"
         case .duplicates: "doc.on.doc.fill"
         case .apps: "app.badge.fill"
@@ -22,6 +24,7 @@ extension Category {
         switch self {
         case .projectArtifacts: .indigo
         case .models: .purple
+        case .largeFiles: .cyan
         case .toolCaches: .orange
         case .appCaches: .blue
         case .logs: .teal
@@ -35,7 +38,8 @@ extension Category {
     var blurb: String {
         switch self {
         case .projectArtifacts: "Dependencies and build output inside your code projects. Rebuilt from lockfiles."
-        case .models: "AI model weights and datasets you downloaded. Large, and slow to fetch again."
+        case .models: "AI models and datasets, listed one by one: Hugging Face, Ollama and weights saved by tools like ComfyUI."
+        case .largeFiles: "Your biggest files: videos, disk images, archives, datasets. Yours to judge, so never pre-selected."
         case .toolCaches: "Package-manager and build-tool caches. Re-downloaded when needed."
         case .appCaches: "Data apps keep to load faster. Recreated automatically."
         case .logs: "Diagnostic logs apps write. Only useful when debugging."
@@ -47,7 +51,7 @@ extension Category {
 
     /// Display order: biggest wins for developers first; apps and Trash last.
     static let displayOrder: [Category] = [
-        .projectArtifacts, .models, .toolCaches, .appCaches, .logs, .duplicates, .apps, .trash,
+        .projectArtifacts, .models, .largeFiles, .toolCaches, .appCaches, .logs, .duplicates, .apps, .trash,
     ]
 }
 
@@ -148,8 +152,23 @@ extension View {
 @MainActor
 enum IconCache {
     private static var cache: [String: NSImage] = [:]
+    /// Quick Look thumbnails (video frames, document pages), filled in asynchronously.
+    static var thumbnails: [String: NSImage] = [:]
+
+    static func loadThumbnail(for path: String, size: CGFloat) async -> NSImage? {
+        if let hit = thumbnails[path] { return hit }
+        let request = QLThumbnailGenerator.Request(
+            fileAt: URL(fileURLWithPath: path), size: CGSize(width: size, height: size),
+            scale: NSScreen.main?.backingScaleFactor ?? 2, representationTypes: .thumbnail)
+        guard let rep = try? await QLThumbnailGenerator.shared.generateBestRepresentation(for: request) else { return nil }
+        thumbnails[path] = rep.nsImage
+        return rep.nsImage
+    }
 
     static func icon(for finding: Finding) -> NSImage? {
+        if finding.category == .largeFiles, let path = finding.paths.first {
+            return thumbnails[path] ?? cached("file:" + path) { NSWorkspace.shared.icon(forFile: path) }
+        }
         if finding.category == .apps, let path = finding.paths.first {
             return cached(path) { NSWorkspace.shared.icon(forFile: path) }
         }
@@ -173,10 +192,16 @@ enum IconCache {
 struct ItemIcon: View {
     var finding: Finding
     var size: CGFloat = 28
+    @State private var thumbnail: NSImage?
 
     var body: some View {
-        if let image = IconCache.icon(for: finding) {
-            Image(nsImage: image).resizable().frame(width: size, height: size)
+        if let image = thumbnail ?? IconCache.icon(for: finding) {
+            Image(nsImage: image).resizable().aspectRatio(contentMode: .fit).frame(width: size, height: size)
+                .clipShape(RoundedRectangle(cornerRadius: finding.category == .largeFiles ? size * 0.18 : 0))
+                .task(id: finding.id) {
+                    guard finding.category == .largeFiles, let path = finding.paths.first else { return }
+                    thumbnail = await IconCache.loadThumbnail(for: path, size: size * 2)
+                }
         } else {
             Image(systemName: symbol)
                 .font(.system(size: size * 0.5, weight: .semibold))
@@ -191,6 +216,8 @@ struct ItemIcon: View {
         case "node_modules", "Framework build cache": "curlybraces"
         case "Python environment", "Python bytecode": "chevron.left.forwardslash.chevron.right"
         case "Rust build output": "gearshape.2.fill"
+        case "Hugging Face model", "Hugging Face dataset", "Model weights (outside managed caches)", "Model weights file": "brain.fill"
+        case "Ollama model": "cpu.fill"
         case "CocoaPods", "Gradle build output": "hammer.fill"
         default: finding.category.symbol
         }

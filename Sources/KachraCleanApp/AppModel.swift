@@ -67,6 +67,11 @@ final class AppModel {
     var unusedAppDays: Int {
         didSet { UserDefaults.standard.set(unusedAppDays, forKey: "unusedAppDays") }
     }
+    var largeFileMB: Int {
+        didSet { UserDefaults.standard.set(largeFileMB, forKey: "largeFileMB") }
+    }
+    /// File shown in Quick Look.
+    var previewURL: URL?
     private(set) var ignoredPaths: Set<String> {
         didSet { UserDefaults.standard.set(Array(ignoredPaths), forKey: "ignoredPaths") }
     }
@@ -78,6 +83,7 @@ final class AppModel {
         let defaults = UserDefaults.standard
         idleDays = defaults.object(forKey: "idleDays") as? Int ?? 30
         unusedAppDays = defaults.object(forKey: "unusedAppDays") as? Int ?? 180
+        largeFileMB = defaults.object(forKey: "largeFileMB") as? Int ?? 500
         ignoredPaths = Set(defaults.stringArray(forKey: "ignoredPaths") ?? [])
         if let saved = try? ScanReport.load(from: ScanReport.defaultLocation) {
             report = saved
@@ -160,6 +166,7 @@ final class AppModel {
         let limited = !hasFullDiskAccess
         lastScanWasLimited = limited
         let scanner = Scanner(options: .init(idleDays: idleDays, unusedAppDays: unusedAppDays,
+                                             largeFileBytes: Int64(largeFileMB) * 1_000_000,
                                              avoidProtectedLocations: limited))
         steps = scanner.plannedSteps.map { ($0, .pending) }
         scanStarted = Date()
@@ -304,6 +311,17 @@ final class AppModel {
 
     private func persist() {
         if let report { try? report.save(to: ScanReport.defaultLocation) }
+    }
+
+    /// Quick Look for single files (videos, documents, images).
+    func canPreview(_ finding: Finding) -> Bool {
+        guard finding.paths.count == 1, let path = finding.paths.first else { return false }
+        return (try? URL(fileURLWithPath: path).resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true
+    }
+
+    func preview(_ finding: Finding) {
+        guard canPreview(finding), let path = finding.paths.first else { return }
+        previewURL = URL(fileURLWithPath: path)
     }
 
     func reveal(_ finding: Finding) {
