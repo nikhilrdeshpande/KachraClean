@@ -50,6 +50,7 @@ public struct Scanner: Sendable {
         case projects = "projects"
         case duplicates = "duplicates"
         case largeFiles = "large files"
+        case modelUsage = "model usage"
         case apps = "apps"
 
         public var title: String {
@@ -60,6 +61,7 @@ public struct Scanner: Sendable {
             case .projects: "Code projects"
             case .duplicates: "Duplicate downloads"
             case .largeFiles: "Large files"
+            case .modelUsage: "Which projects use each model"
             case .apps: "Applications"
             }
         }
@@ -80,6 +82,7 @@ public struct Scanner: Sendable {
         if wanted.contains(.projectArtifacts) { steps.append(.projects) }
         if wanted.contains(.duplicates) { steps.append(.duplicates) }
         if !wanted.isDisjoint(with: [.largeFiles, .models]) { steps.append(.largeFiles) }
+        if wanted.contains(.models) { steps.append(.modelUsage) }
         if wanted.contains(.apps) { steps.append(.apps) }
         return steps
     }
@@ -128,6 +131,14 @@ public struct Scanner: Sendable {
             await timed(.largeFiles) {
                 await LargeFileScanner(home: home, minimumBytes: options.largeFileBytes, excluded: claimed).scan()
             }
+        }
+        if wanted.contains(.models), !Task.isCancelled {
+            progress?(.started(.modelUsage))
+            let start = Date()
+            let usage = ModelUsageScanner(roots: options.projectRoots, home: home)
+            findings = await usage.annotate(findings)
+            timings[Step.modelUsage.rawValue] = Date().timeIntervalSince(start)
+            progress?(.finished(.modelUsage, found: 0))
         }
         if wanted.contains(.apps) {
             await timed(.apps) { await AppScanner(home: home, unusedDays: options.unusedAppDays,

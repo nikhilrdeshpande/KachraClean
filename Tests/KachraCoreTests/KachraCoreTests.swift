@@ -341,3 +341,40 @@ let longAgo = Date().addingTimeInterval(-200 * 86_400)
         #expect(Activity.days(since: Date().addingTimeInterval(3_600)) == 0)
     }
 }
+
+@Suite struct ModelUsageTests {
+    @Test func findsProjectsThatMentionAModel() async throws {
+        let box = try Sandbox()
+        try box.file("code/captioner/pyproject.toml")
+        let script = box.root.appendingPathComponent("code/captioner/src/run.py")
+        try FileManager.default.createDirectory(at: script.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(#"model = AutoModel.from_pretrained("Qwen/Qwen2.5-VL-3B-Instruct")"#.utf8).write(to: script)
+        // Library code in a virtualenv mentions models it doesn't use: ignored.
+        try box.file("code/other/.venv/pyvenv.cfg")
+        try Data(#"EXAMPLE = "org/unused-model""#.utf8).write(to: box.root.appendingPathComponent("code/other/.venv/lib.py"))
+        let chat = box.root.appendingPathComponent("code/bot/package.json")
+        try FileManager.default.createDirectory(at: chat.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(#"{"config": {"model": "llama3.2"}}"#.utf8).write(to: chat)
+
+        let usage = await ModelUsageScanner(roots: [box.root], home: box.root)
+            .scan(for: ["qwen/qwen2.5-vl-3b-instruct", "org/unused-model", "llama3.2:latest"])
+        #expect(usage.complete)
+        #expect(usage.projects["qwen/qwen2.5-vl-3b-instruct"]?.map(\.lastPathComponent) == ["captioner"])
+        #expect(usage.projects["org/unused-model"] == nil)
+        #expect(usage.projects["llama3.2:latest"]?.map(\.lastPathComponent) == ["bot"])
+    }
+
+    @Test func annotatesFindingsWithEvidence() async throws {
+        let box = try Sandbox()
+        let used = Finding(category: .models, title: "org/used", paths: ["/x"], bytes: 1, safety: .review,
+                           reason: "Weights.", details: ["kind": "Hugging Face model", "repo": "org/used"])
+        let unused = Finding(category: .models, title: "org/idle", paths: ["/y"], bytes: 1, safety: .review,
+                             reason: "Weights.", details: ["kind": "Hugging Face model", "repo": "org/idle"])
+        try box.file("app/.git/HEAD")
+        try Data(#"name = "org/used""#.utf8).write(to: box.root.appendingPathComponent("app/config.toml"))
+        let result = await ModelUsageScanner(roots: [box.root], home: box.root).annotate([used, unused])
+        #expect(result[0].details["usedInFirst"] == "app")
+        #expect(result[0].reason.contains("Used by app"))
+        #expect(result[1].details["usedIn"] == "No project mentions it")
+    }
+}

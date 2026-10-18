@@ -190,17 +190,27 @@ struct ResultsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 HStack(spacing: 10) {
-                    Button {
-                        model.cleanSelection()
-                    } label: {
-                        Label("Clean \(Format.bytes(model.selectedBytes))", systemImage: "sparkles")
-                            .font(.headline).padding(.horizontal, 8).padding(.vertical, 2)
+                    if model.reportIsStale && model.selection.isEmpty {
+                        Button {
+                            model.requestScan()
+                        } label: {
+                            Label("Scan Again", systemImage: "arrow.clockwise")
+                                .font(.headline).padding(.horizontal, 8).padding(.vertical, 2)
+                        }
+                        .controlSize(.extraLarge)
+                        .prominentGlassButton()
+                    } else {
+                        Button {
+                            model.cleanSelection()
+                        } label: {
+                            Label("Clean \(Format.bytes(model.selectedBytes))", systemImage: "sparkles")
+                                .font(.headline).padding(.horizontal, 8).padding(.vertical, 2)
+                        }
+                        .controlSize(.extraLarge)
+                        .prominentGlassButton()
+                        .disabled(model.selection.isEmpty || model.phase != .ready)
+                        .help("Moves everything selected, in every category, to the Trash (⌘⌫). Undo puts it back.")
                     }
-                    .controlSize(.extraLarge)
-                    .prominentGlassButton()
-                    .keyboardShortcut(.delete, modifiers: .command)
-                    .disabled(model.selection.isEmpty || model.phase != .ready)
-                    .help("Moves the selected items to the Trash. Undo puts them back.")
                     Button("Review") { open(Category.displayOrder.first { model.total($0) > 0 } ?? .projectArtifacts) }
                         .controlSize(.extraLarge)
                         .glassButton()
@@ -212,12 +222,19 @@ struct ResultsView: View {
     }
 
     private var summary: String {
-        let count = model.selection.count
-        let more = Format.bytes(max(0, model.reclaimable - model.selectedBytes))
-        if model.selectedNeedingReview > 0 {
-            return "\(count) items selected, \(model.selectedNeedingReview) of them marked review. \(more) more is not selected."
+        let chosen = model.selectedFindings
+        if chosen.isEmpty {
+            return model.reportIsStale
+                ? "These results are from \(Format.relative(model.report?.createdAt) ?? "a while ago"), so nothing is pre-selected. Scan again for fresh suggestions, or open a category to pick items."
+                : "Nothing selected. Open a category to pick what to clean."
         }
-        return "\(count) safe items that regenerate by themselves. \(more) more is worth a look."
+        // Spell out what "Clean" includes, biggest first.
+        let parts = Dictionary(grouping: chosen, by: \.category)
+            .map { ($0.key, $0.value.reduce(0) { $0 + $1.bytes }) }
+            .sorted { $0.1 > $1.1 }
+            .map { "\($0.0.title) \(Format.bytes($0.1))" }
+        let review = model.selectedNeedingReview > 0 ? " \(model.selectedNeedingReview) of them marked review." : ""
+        return "Includes \(ListFormatter.localizedString(byJoining: parts)).\(review) Open a category to clean just that."
     }
 
     private var footer: some View {
@@ -261,9 +278,17 @@ struct CategoryCard: View {
                 }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(category.title).font(.headline)
-                    Text(Format.bytes(model.total(category)))
-                        .font(.system(.title2, design: .rounded).weight(.semibold))
-                        .monospacedDigit()
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(Format.bytes(model.total(category)))
+                            .font(.system(.title2, design: .rounded).weight(.semibold))
+                            .monospacedDigit()
+                        let selected = model.selectedFindings(in: category).reduce(0) { $0 + $1.bytes }
+                        if selected > 0 {
+                            Text("\(Format.bytes(selected)) selected")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.green)
+                        }
+                    }
                 }
                 if category.countsAsReclaimable {
                     SafetySplitBar(safe: model.total(category, safety: .safe),
@@ -295,6 +320,8 @@ struct CategoryCard: View {
             let idle = items.filter { $0.safety == .safe }.count
             return "\(items.count) folders in \(projects) projects · \(idle) idle with a lockfile"
         case .models:
+            let unused = items.filter { $0.details["usedIn"] == "No project mentions it" }.count
+            if unused > 0 { return "\(items.count) models and datasets · \(unused) not used by any of your projects" }
             let biggest = items.max { $0.bytes < $1.bytes }
             let largest = biggest.map { " · largest \($0.title.split(separator: "/").last ?? "") (\(Format.bytes($0.bytes)))" } ?? ""
             return "\(items.count) models and datasets" + largest

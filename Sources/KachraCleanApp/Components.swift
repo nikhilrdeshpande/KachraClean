@@ -41,50 +41,68 @@ struct SafetySplitBar: View {
     }
 }
 
-/// Floating action bar: what's selected and the one button that cleans it.
+/// Floating action bar for one category: what's selected *here* and the button that cleans it.
+/// Selections in other categories are mentioned, never included.
 struct ActionBar: View {
     @Environment(AppModel.self) private var model
+    var category: Category
+    /// Selected items in this category that the current filter or search hides.
+    var hiddenSelected: Int
 
     var body: some View {
+        let chosen = model.selectedFindings(in: category)
+        let bytes = chosen.reduce(0) { $0 + $1.bytes }
+        let review = chosen.filter { $0.safety != .safe }.count
+        let elsewhere = model.selectedFindings.filter { $0.category != category }
         HStack(spacing: 14) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(model.selection.isEmpty ? "Nothing selected" : "\(Format.bytes(model.selectedBytes)) selected")
+            VStack(alignment: .leading, spacing: 2) {
+                Text(chosen.isEmpty ? "Nothing selected" : "\(Format.bytes(bytes)) of \(category.title.lowercased()) selected")
                     .font(.headline)
                     .monospacedDigit()
                     .contentTransition(.numericText())
                 Group {
-                    if model.selectedNeedingReview > 0 {
-                        Label("\(model.selection.count) items · \(model.selectedNeedingReview) marked review",
-                              systemImage: "eye.fill")
+                    if chosen.isEmpty {
+                        Text("Tick items to move them to the Trash.").foregroundStyle(.secondary)
+                    } else if review > 0 {
+                        Label(detail(count: chosen.count, "\(review) marked review"), systemImage: "eye.fill")
                             .foregroundStyle(.orange)
                     } else {
-                        Text("\(model.selection.count) items · all safe · moves to Trash, undoable")
-                            .foregroundStyle(.secondary)
+                        Text(detail(count: chosen.count, "all safe · undoable")).foregroundStyle(.secondary)
                     }
                 }
                 .font(.caption)
+                if !elsewhere.isEmpty {
+                    Text("Not included: \(Format.bytes(elsewhere.reduce(0) { $0 + $1.bytes })) selected in other categories")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
             }
             Spacer(minLength: 20)
             if model.phase == .cleaning { ProgressView().controlSize(.small) }
             Button {
                 model.cleanSelection()
             } label: {
-                Label("Move to Trash", systemImage: "trash")
+                Label(chosen.count == 1 ? "Move 1 Item to Trash" : "Move \(chosen.count) Items to Trash", systemImage: "trash")
                     .padding(.horizontal, 6)
             }
             .controlSize(.large)
             .prominentGlassButton()
-            .keyboardShortcut(.delete, modifiers: .command)
-            .disabled(model.selection.isEmpty || model.phase != .ready)
+            .disabled(chosen.isEmpty || model.phase != .ready)
+            .help("Moves only the selected \(category.title.lowercased()) to the Trash (⌘⌫). Undo puts them back.")
         }
         .padding(.leading, 20)
         .padding(.trailing, 10)
         .padding(.vertical, 10)
         .glassSurface(in: Capsule())
         .shadow(color: .black.opacity(0.12), radius: 16, y: 6)
-        .frame(maxWidth: 640)
+        .frame(maxWidth: 680)
         .padding(.bottom, 16)
         .padding(.horizontal, 24)
+    }
+
+    private func detail(count: Int, _ tail: String) -> String {
+        let hidden = hiddenSelected > 0 ? " · \(hiddenSelected) hidden by filter" : ""
+        return "\(count) \(count == 1 ? "item" : "items") · \(tail)\(hidden)"
     }
 }
 
@@ -97,10 +115,11 @@ struct ToastView: View {
         HStack(spacing: 12) {
             Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.title3)
             Text(toast.message).font(.callout.weight(.medium))
-            if toast.canUndo {
-                Button("Undo") { model.undoLastClean() }
-                    .keyboardShortcut("z")
+            if toast.undo != nil {
+                Button("Undo") { model.undo(toast) }
                     .glassButton()
+            }
+            if toast.undo == .clean {
                 Button("Open Trash") { model.openTrash() }
                     .buttonStyle(.borderless)
             }

@@ -19,7 +19,7 @@ struct RootView: View {
             ZStack(alignment: .bottom) {
                 switch destination {
                 case .category(let category):
-                    CategoryDetailView(category: category)
+                    CategoryDetailView(category: category) { destination = .home }
                 default:
                     HomeView { destination = .category($0) }
                 }
@@ -60,6 +60,10 @@ struct RootView: View {
                     model.focused = model.findings(in: category).max { $0.bytes < $1.bytes }?.id
                 }
             }
+        }
+        .onChange(of: destination, initial: true) { _, new in
+            if case .category(let category) = new { model.scope = category } else { model.scope = nil }
+            model.search = ""
         }
         .sheet(isPresented: Bindable(model).showPermissionGate) { PermissionGate() }
         .confirmationDialog(

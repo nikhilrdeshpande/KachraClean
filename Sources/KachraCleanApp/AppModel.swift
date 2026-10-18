@@ -32,9 +32,14 @@ final class AppModel {
     }
 
     struct Toast: Identifiable, Equatable {
+        enum Undo: Equatable {
+            case clean
+            case ignore(paths: Set<String>)
+        }
+
         let id = UUID()
         var message: String
-        var canUndo: Bool
+        var undo: Undo?
     }
 
     // MARK: State
@@ -42,6 +47,9 @@ final class AppModel {
     var phase: Phase = .idle
     var report: ScanReport?
     var selection: Set<String> = []
+    /// The category on screen, or nil on the Overview. Cleaning acts on what's in view: inside a
+    /// category only that category's selection moves, so a selection made elsewhere never rides along.
+    var scope: Category?
     var steps: [(step: Scanner.Step, state: StepState)] = []
     var scanStarted: Date?
     var toast: Toast?
@@ -128,9 +136,23 @@ final class AppModel {
         visibleFindings.filter { selection.contains($0.id) }
     }
 
+    /// Selected findings in one category, or everywhere for nil.
+    func selectedFindings(in category: Category?) -> [Finding] {
+        selectedFindings.filter { category == nil || $0.category == category }
+    }
+
+    /// What the Clean action would move right now.
+    var scopedSelection: [Finding] { selectedFindings(in: scope) }
+
     var selectedBytes: Int64 { selectedFindings.reduce(0) { $0 + $1.bytes } }
 
     var selectedNeedingReview: Int { selectedFindings.filter { $0.safety != .safe }.count }
+
+    /// Whether the report is too old to pre-select from (see `freshScanAge`).
+    var reportIsStale: Bool {
+        guard let report else { return false }
+        return report.createdAt.timeIntervalSinceNow < -Self.freshScanAge
+    }
 
     var focusedFinding: Finding? {
         focused.flatMap { id in report?.findings.first { $0.id == id } }
@@ -232,10 +254,10 @@ final class AppModel {
 
     // MARK: Cleaning
 
-    /// Cleans the current selection. Reversible moves happen immediately with Undo;
+    /// Cleans the selection in scope. Reversible moves happen immediately with Undo;
     /// removing apps asks first.
     func cleanSelection() {
-        let chosen = selectedFindings
+        let chosen = scopedSelection
         guard !chosen.isEmpty, phase == .ready else { return }
         if chosen.contains(where: { $0.category == .apps }) {
             pendingConfirmation = chosen
@@ -269,7 +291,7 @@ final class AppModel {
             let skipped = failedIDs.count
             showToast(
                 "Moved \(Format.bytes(freed)) to the Trash" + (skipped > 0 ? " · \(skipped) skipped" : ""),
-                canUndo: !trashed.isEmpty
+                undo: trashed.isEmpty ? nil : .clean
             )
             phase = .ready
         }
@@ -286,16 +308,43 @@ final class AppModel {
         selection.formUnion(back.map(\.id))
         persist()
         lastClean = nil
-        showToast("Put back \(restored.count) items", canUndo: false)
+        showToast("Put back \(restored.count) items")
     }
 
     // MARK: Ignore list
 
     func ignore(_ finding: Finding) {
-        ignoredPaths.formUnion(finding.paths)
+        let added = Set(finding.paths).subtracting(ignoredPaths)
+        ignoredPaths.formUnion(added)
         selection.remove(finding.id)
         if focused == finding.id { focused = nil }
-        showToast("KachraClean won't suggest \(finding.title) again", canUndo: false)
+        showToast("KachraClean won't suggest \(finding.title) again", undo: .ignore(paths: added))
+    }
+
+    var canUndo: Bool {
+        if case .ignore = toast?.undo { return true }
+        return lastClean != nil
+    }
+
+    var undoTitle: String {
+        if case .ignore = toast?.undo { return "Undo Never Suggest" }
+        return "Undo Clean"
+    }
+
+    /// ⌘Z: the most recent undoable action.
+    func undoLatest() {
+        if let toast, case .ignore = toast.undo { undo(toast) } else { undoLastClean() }
+    }
+
+    /// Runs the toast's Undo action.
+    func undo(_ toast: Toast) {
+        switch toast.undo {
+        case .clean: undoLastClean()
+        case .ignore(let paths):
+            ignoredPaths.subtract(paths)
+            dismissToast()
+        case nil: break
+        }
     }
 
     func clearIgnored() { ignoredPaths = [] }
@@ -304,11 +353,11 @@ final class AppModel {
 
     // MARK: Helpers
 
-    func showToast(_ message: String, canUndo: Bool) {
-        toast = Toast(message: message, canUndo: canUndo)
+    func showToast(_ message: String, undo: Toast.Undo? = nil) {
+        toast = Toast(message: message, undo: undo)
         toastTask?.cancel()
         toastTask = Task {
-            try? await Task.sleep(for: .seconds(canUndo ? 12 : 4))
+            try? await Task.sleep(for: .seconds(undo != nil ? 12 : 4))
             if !Task.isCancelled { toast = nil }
         }
     }

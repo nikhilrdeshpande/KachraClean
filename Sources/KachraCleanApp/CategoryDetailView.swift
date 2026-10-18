@@ -5,6 +5,7 @@ import SwiftUI
 struct CategoryDetailView: View {
     @Environment(AppModel.self) private var model
     var category: Category
+    var onBack: () -> Void
     @State private var filter: Safety?
     @State private var sort: Sort = .size
 
@@ -24,10 +25,25 @@ struct CategoryDetailView: View {
         // grow toward the screen edge, which clipped the sidebar when the window couldn't.
         HStack(spacing: 0) {
         VStack(spacing: 0) {
-            header(all: all)
-            if shown.isEmpty {
-                ContentUnavailableView.search(text: model.search)
-                    .frame(maxHeight: .infinity)
+            header(all: all, shown: shown)
+            if all.isEmpty {
+                ContentUnavailableView {
+                    Label("Nothing left here", systemImage: "checkmark.circle")
+                } description: {
+                    Text("Everything in \(category.title.lowercased()) has been cleaned or ignored.")
+                } actions: {
+                    Button("Back to Overview", action: onBack)
+                }
+                .frame(maxHeight: .infinity)
+            } else if shown.isEmpty {
+                ContentUnavailableView {
+                    Label("No matches", systemImage: "line.3.horizontal.decrease.circle")
+                } description: {
+                    Text("No items match the current filter.")
+                } actions: {
+                    Button("Show All") { filter = nil; model.search = "" }
+                }
+                .frame(maxHeight: .infinity)
             } else {
                 List(selection: $model.focused) {
                     ForEach(shown) { finding in
@@ -43,7 +59,11 @@ struct CategoryDetailView: View {
         }
         .frame(minWidth: 460, maxWidth: .infinity)
         .overlay(alignment: .bottom) {
-            if model.report != nil, model.phase != .scanning { ActionBar() }
+            if model.report != nil, model.phase != .scanning, category != .trash, !all.isEmpty {
+                let shownIDs = Set(shown.map(\.id))
+                ActionBar(category: category,
+                          hiddenSelected: all.filter { model.selection.contains($0.id) && !shownIDs.contains($0.id) }.count)
+            }
         }
         if model.showInspector {
             Divider()
@@ -71,13 +91,16 @@ struct CategoryDetailView: View {
                 .keyboardShortcut(.space, modifiers: [])
                 .opacity(0)
         }
-        .onChange(of: category) { model.focused = nil }
+        .onChange(of: category) {
+            model.focused = nil
+            filter = nil
+        }
         // Standard Mac pattern: the inspector follows the selection instead of always taking space.
         .onChange(of: model.focused) { _, focused in if focused != nil { model.showInspector = true } }
         .onAppear { if model.focused != nil { model.showInspector = true } }
     }
 
-    private func header(all: [Finding]) -> some View {
+    private func header(all: [Finding], shown: [Finding]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
                 Label(category.title, systemImage: category.symbol)
@@ -118,14 +141,28 @@ struct CategoryDetailView: View {
                 .menuStyle(.button)
                 .fixedSize()
                 .help("Sort")
-                if category != .trash {
+                if category == .trash {
+                    Button("Open Trash in Finder") { model.openTrash() }.fixedSize()
+                } else {
+                    // Acts on what's on screen, so a search narrows what gets selected.
+                    let filtered = shown.count != all.count
+                    let safe = shown.filter { $0.safety == .safe }.count
+                    let upToReview = shown.filter { $0.safety <= .review }.count
                     Menu {
-                        Button("Select All Safe") { model.select(all, upTo: .safe) }
-                        Button("Select Safe and Review") { model.select(all, upTo: .review) }
+                        Button("Select Safe (\(safe))") { model.select(shown, upTo: .safe) }
+                            .disabled(safe == 0)
+                        Button("Select Safe and Review (\(upToReview))") { model.select(shown, upTo: .review) }
+                            .disabled(upToReview == 0)
+                        if category == .apps || category == .largeFiles {
+                            Button("Select All (\(shown.count))") { model.select(shown, upTo: .risky) }
+                        }
                         Divider()
-                        Button("Deselect All") { model.deselect(all) }
+                        Button(filtered ? "Deselect Shown" : "Deselect All") { model.deselect(shown) }
+                        if filtered {
+                            Button("Deselect Everything in \(category.title)") { model.deselect(all) }
+                        }
                     } label: {
-                        Label("Select", systemImage: "checklist")
+                        Label(filtered ? "Select Shown" : "Select", systemImage: "checklist")
                     }
                     .fixedSize()
                 }
@@ -195,6 +232,13 @@ struct FindingRow: View {
                 HStack(spacing: 6) {
                     Text(finding.title).font(.body.weight(.medium)).lineLimit(1)
                     if let activity = activityChip { Text(activity).font(.caption).foregroundStyle(.tertiary) }
+                    if let project = finding.details["usedInFirst"] {
+                        Label("Used by \(project)", systemImage: "folder.fill")
+                            .font(.caption)
+                            .foregroundStyle(.indigo)
+                            .lineLimit(1)
+                            .help(finding.details["usedIn"] ?? "")
+                    }
                 }
                 Text(subtitle).font(.callout).foregroundStyle(.secondary).lineLimit(1)
             }
@@ -326,10 +370,10 @@ struct InspectorView: View {
     /// Human-readable evidence, in a sensible order.
     private func facts(_ f: Finding) -> [(String, String)] {
         let labels: [(String, String)] = [
-            ("repo", "Repository"), ("project", "Project"), ("kind", "Kind"), ("lastActivity", "Last activity"), ("lockfile", "Lockfile"),
+            ("repo", "Repository"), ("usedIn", "Used by"), ("project", "Project"), ("kind", "Kind"), ("lastActivity", "Last activity"), ("lockfile", "Lockfile"),
             ("git", "Git repo"), ("usage", "Usage"), ("bundleID", "Bundle ID"), ("copies", "Copies"),
             ("keep", "Keeping"), ("folders", "Folders"), ("folder", "Folder"), ("revisions", "Revisions"),
-            ("files", "Files"), ("shared", "Shared"), ("command", "CLI equivalent"),
+            ("files", "Files"), ("shared", "Shared"), ("external", "Linked files"), ("command", "CLI equivalent"),
         ]
         var result = labels.compactMap { key, label in
             f.details[key].map { (label, key == "keep" ? Format.path($0) : $0) }

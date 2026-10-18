@@ -28,14 +28,16 @@ struct KachraCleanApp: App {
                     .disabled(model.isScanning)
             }
             CommandGroup(replacing: .undoRedo) {
-                Button("Undo Clean") { model.undoLastClean() }
+                Button(model.undoTitle) { model.undoLatest() }
                     .keyboardShortcut("z")
-                    .disabled(model.lastClean == nil)
+                    .disabled(!model.canUndo)
             }
             CommandMenu("Clean") {
-                Button("Move Selection to Trash") { model.cleanSelection() }
-                    .keyboardShortcut(.delete, modifiers: .command)
-                    .disabled(model.selection.isEmpty || model.phase != .ready)
+                Button(model.scope.map { "Move Selected \($0.title) to Trash" } ?? "Move Everything Selected to Trash") {
+                    model.cleanSelection()
+                }
+                .keyboardShortcut(.delete, modifiers: .command)
+                .disabled(model.scopedSelection.isEmpty || model.phase != .ready)
                 Button("Select Only Safe Items") { model.selectOnlySafe() }
                     .keyboardShortcut("s", modifiers: [.command, .shift])
                 Divider()
