@@ -378,3 +378,83 @@ let longAgo = Date().addingTimeInterval(-200 * 86_400)
         #expect(result[1].details["usedIn"] == "No project mentions it")
     }
 }
+
+@Suite struct DiskExplorerTests {
+    @Test func oneWalkSizesTheFolderAndTheFoldersBelowIt() async throws {
+        let box = try Sandbox()
+        let a = try box.file("top/a/one.bin", bytes: 40_000)
+        let b = try box.file("top/a/deep/two.bin", bytes: 90_000)
+        let c = try box.file("top/.hidden/three.bin", bytes: 10_000)
+        let expected = [a, b, c].reduce(0) { $0 + DiskUsage.allocatedSize(of: $1) }
+        let sizer = DiskSizer(home: box.root)
+
+        let size = await sizer.measure(box.root.appendingPathComponent("top"))
+        #expect(size.bytes == expected, "hidden files count too")
+        #expect(size.complete)
+        #expect(size.items == 6)  // a, one.bin, deep, two.bin, .hidden, three.bin
+        let below = await sizer.cached(box.root.appendingPathComponent("top/a/deep"))
+        #expect(below?.bytes == DiskUsage.allocatedSize(of: b), "sub-folders are cached by the same walk")
+    }
+
+    @Test func unreadableFoldersMakeTheSizeALowerBound() async throws {
+        let box = try Sandbox()
+        try box.file("top/open/x.bin", bytes: 8_000)
+        try box.file("top/shut/y.bin", bytes: 8_000)
+        let shut = box.root.appendingPathComponent("top/shut")
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: shut.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: shut.path) }
+
+        let sizer = DiskSizer(home: box.root)
+        let size = await sizer.measure(box.root.appendingPathComponent("top"))
+        #expect(!size.complete)
+        #expect(await sizer.cached(box.root.appendingPathComponent("top/open"))?.complete == true)
+        #expect(await sizer.cached(shut)?.complete == false)
+    }
+
+    @Test func adjustingAfterTrashUpdatesTheFoldersAbove() async throws {
+        let box = try Sandbox()
+        let file = try box.file("top/a/big.bin", bytes: 50_000)
+        try box.file("top/b/small.bin", bytes: 4_000)
+        let sizer = DiskSizer(home: box.root)
+        let top = box.root.appendingPathComponent("top")
+        let before = await sizer.measure(top).bytes
+        let removed = DiskUsage.allocatedSize(of: file)
+
+        await sizer.adjust(box.root.appendingPathComponent("top/a").path, by: -removed)
+        #expect(await sizer.cached(top)?.bytes == before - removed)
+        #expect(await sizer.cached(box.root.appendingPathComponent("top/a")) == nil, "measured again when shown")
+    }
+
+    @Test func indexFindsSuggestionsAtAndInsideAFolder() {
+        let cache = Finding(category: .appCaches, title: "app", paths: ["/h/Library/Caches/app"], bytes: 100,
+                            safety: .safe, reason: "")
+        let dupes = Finding(category: .duplicates, title: "x", paths: ["/h/Downloads/x (1).zip", "/h/Desktop/x.zip"],
+                            bytes: 60, safety: .review, reason: "")
+        let index = FindingIndex([cache, dupes])
+        #expect(index.at("/h/Library/Caches/app").map(\.id) == [cache.id])
+        #expect(index.inside("/h/Library").bytes == 100)
+        #expect(index.inside("/h/Library").safeBytes == 100)
+        #expect(index.inside("/h/Downloads").bytes == 30, "a group split across folders counts its share")
+        #expect(index.inside("/h/Library/Caches/app").findings.isEmpty, "a folder is not inside itself")
+        #expect(index.inside("/h/Lib").findings.isEmpty, "prefix of a name is not a parent")
+    }
+
+    @Test func handPickedItemsGetLocationGuardsButNoCategoryCheck() throws {
+        let box = try Sandbox()
+        let cleaner = Cleaner(home: box.root, dryRun: true)
+        try box.file("Documents/old-project/a.txt")
+        try box.file(".ssh/id_ed25519")
+        try box.file("Library/Mobile Documents/com~apple~CloudDocs/a.txt")
+        func refused(_ path: String) -> Bool {
+            cleaner.refusal(for: box.root.appendingPathComponent(path), category: nil) != nil
+        }
+        #expect(!refused("Documents/old-project"))
+        #expect(refused("Documents"))
+        #expect(refused("Library/Caches"))
+        #expect(refused(".ssh/id_ed25519"))
+        #expect(refused("Library/Mobile Documents/com~apple~CloudDocs/a.txt"))
+        #expect(cleaner.refusal(for: URL(fileURLWithPath: "/usr/local/bin"), category: nil) != nil)
+        let outcome = cleaner.trash([box.root.appendingPathComponent("Documents/old-project")])
+        #expect(outcome.first?.error == nil)
+    }
+}

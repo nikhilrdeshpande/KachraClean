@@ -30,29 +30,29 @@ public struct Cleaner: Sendable {
     }
 
     public func clean(_ findings: [Finding]) -> [Outcome] {
-        var outcomes: [Outcome] = []
-        for finding in findings {
-            for path in finding.paths {
-                let url = URL(fileURLWithPath: path)
-                if let problem = refusal(for: url, category: finding.category) {
-                    outcomes.append(Outcome(findingID: finding.id, path: path, trashedTo: nil, error: problem))
-                    continue
-                }
-                if dryRun {
-                    outcomes.append(Outcome(findingID: finding.id, path: path, trashedTo: nil, error: nil))
-                    continue
-                }
-                do {
-                    var resulting: NSURL?
-                    try FileManager().trashItem(at: url, resultingItemURL: &resulting)
-                    outcomes.append(Outcome(findingID: finding.id, path: path, trashedTo: resulting?.path, error: nil))
-                } catch {
-                    outcomes.append(Outcome(findingID: finding.id, path: path, trashedTo: nil,
-                                            error: error.localizedDescription))
-                }
-            }
+        findings.flatMap { finding in
+            finding.paths.map { move($0, findingID: finding.id, category: finding.category) }
         }
-        return outcomes
+    }
+
+    /// Items the user picked in the Disk Explorer: the same location guards, no category check.
+    public func trash(_ urls: [URL]) -> [Outcome] {
+        urls.map { move($0.path, findingID: "", category: nil) }
+    }
+
+    private func move(_ path: String, findingID: String, category: Category?) -> Outcome {
+        let url = URL(fileURLWithPath: path)
+        if let problem = refusal(for: url, category: category) {
+            return Outcome(findingID: findingID, path: path, trashedTo: nil, error: problem)
+        }
+        if dryRun { return Outcome(findingID: findingID, path: path, trashedTo: nil, error: nil) }
+        do {
+            var resulting: NSURL?
+            try FileManager().trashItem(at: url, resultingItemURL: &resulting)
+            return Outcome(findingID: findingID, path: path, trashedTo: resulting?.path, error: nil)
+        } catch {
+            return Outcome(findingID: findingID, path: path, trashedTo: nil, error: error.localizedDescription)
+        }
     }
 
     /// Puts trashed items back where they came from (Undo). Returns the outcomes that were restored.
@@ -71,8 +71,9 @@ public struct Cleaner: Sendable {
         return restored
     }
 
-    /// Why a path must not be touched, or nil if it may go to the Trash.
-    public func refusal(for url: URL, category: Category) -> String? {
+    /// Why a path must not be touched, or nil if it may go to the Trash. A nil category means the
+    /// user picked the item by hand in the Disk Explorer.
+    public func refusal(for url: URL, category: Category?) -> String? {
         let path = url.resolvedPath
         let homePath = home.resolvedPath
         if category == .trash { return "The Trash is only reported; empty it yourself in Finder." }
@@ -88,6 +89,7 @@ public struct Cleaner: Sendable {
         if parts[0] == "Library", parts.count < 3 { return "Top-level Library folder; refusing." }
         if let reason = Self.sensitivity(of: parts) { return reason }
         if !FileManager().fileExists(atPath: path) { return "No longer exists." }
+        guard let category else { return nil }
         return mismatch(path: path, parts: parts, category: category)
     }
 

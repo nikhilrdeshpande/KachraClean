@@ -33,11 +33,17 @@ struct KachraCleanApp: App {
                     .disabled(!model.canUndo)
             }
             CommandMenu("Clean") {
-                Button(model.scope.map { "Move Selected \($0.title) to Trash" } ?? "Move Everything Selected to Trash") {
-                    model.cleanSelection()
+                if model.onExplorer {
+                    Button("Move to Trash…") { model.requestExplorerTrash() }
+                        .keyboardShortcut(.delete, modifiers: .command)
+                        .disabled(!model.canTrashExplorerSelection)
+                } else {
+                    Button(model.scope.map { "Move Selected \($0.title) to Trash" } ?? "Move Everything Selected to Trash") {
+                        model.cleanSelection()
+                    }
+                    .keyboardShortcut(.delete, modifiers: .command)
+                    .disabled(model.scopedSelection.isEmpty || model.phase != .ready)
                 }
-                .keyboardShortcut(.delete, modifiers: .command)
-                .disabled(model.scopedSelection.isEmpty || model.phase != .ready)
                 Button("Select Only Safe Items") { model.selectOnlySafe() }
                     .keyboardShortcut("s", modifiers: [.command, .shift])
                 Divider()

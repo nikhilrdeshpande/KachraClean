@@ -113,7 +113,9 @@ struct ToastView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.title3)
+            Image(systemName: toast.failed ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                .foregroundStyle(toast.failed ? .orange : .green)
+                .font(.title3)
             Text(toast.message).font(.callout.weight(.medium))
             if toast.undo != nil {
                 Button("Undo") { model.undo(toast) }

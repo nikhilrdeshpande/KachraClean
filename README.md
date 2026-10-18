@@ -18,6 +18,9 @@ KachraClean aims to cover both:
 - **Model and toolchain caches** such as Hugging Face, Ollama, `~/.cache`, npm/pnpm/pip/uv and Homebrew.
 - **Duplicate downloads**, with a stated rule for which copy is kept.
 - **Unused apps**, with the evidence behind each verdict ("last opened 12 Mar" vs. "no usage data").
+- **Disk Explorer**: every folder in your home, biggest first, in Finder-style columns. Suggestions
+  are marked, and folders that hold them say how much, so space the scan doesn't recognise isn't
+  invisible.
 
 Safety comes first:
 
@@ -65,6 +68,7 @@ swift build -c release
 .build/release/kachra scan --only projectArtifacts,models --top 20
 .build/release/kachra clean --category toolCaches # dry run: shows what would move to the Trash
 .build/release/kachra clean --id <id> --yes       # actually moves that finding to the Trash
+.build/release/kachra explore ~/code              # a folder's contents, biggest first
 ./scripts/test.sh                                 # run the tests
 ```
 

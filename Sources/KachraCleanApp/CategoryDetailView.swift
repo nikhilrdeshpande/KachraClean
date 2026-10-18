@@ -343,6 +343,12 @@ struct InspectorView: View {
                         }
                         .buttonStyle(.link)
                         .font(.callout)
+                        if f.paths.first?.hasPrefix(FileManager.default.homeDirectoryForCurrentUser.path + "/") == true {
+                            Button("Show in Disk Explorer") { model.showInExplorer(f) }
+                                .buttonStyle(.link)
+                                .font(.callout)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
                 }
                 .padding(18)

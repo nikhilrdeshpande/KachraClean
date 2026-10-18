@@ -3,6 +3,7 @@ import SwiftUI
 
 enum Destination: Hashable {
     case home
+    case explorer
     case category(Category)
 }
 
@@ -20,6 +21,8 @@ struct RootView: View {
                 switch destination {
                 case .category(let category):
                     CategoryDetailView(category: category) { destination = .home }
+                case .explorer:
+                    DiskExplorerView()
                 default:
                     HomeView { destination = .category($0) }
                 }
@@ -54,6 +57,7 @@ struct RootView: View {
         .onAppear {
             // Developer/screenshot hook: `-KCOpen projectArtifacts [-KCFocusFirst YES]`.
             if UserDefaults.standard.bool(forKey: "KCScan") { model.scan() }
+            if UserDefaults.standard.string(forKey: "KCOpen") == "explorer" { destination = .explorer }
             if let raw = UserDefaults.standard.string(forKey: "KCOpen"), let category = Category(rawValue: raw) {
                 destination = .category(category)
                 if UserDefaults.standard.bool(forKey: "KCFocusFirst") {
@@ -63,7 +67,13 @@ struct RootView: View {
         }
         .onChange(of: destination, initial: true) { _, new in
             if case .category(let category) = new { model.scope = category } else { model.scope = nil }
+            model.onExplorer = new == .explorer
             model.search = ""
+        }
+        .onChange(of: model.navigationRequest) { _, request in
+            guard let request else { return }
+            destination = request
+            model.navigationRequest = nil
         }
         .sheet(isPresented: Bindable(model).showPermissionGate) { PermissionGate() }
         .confirmationDialog(
@@ -96,6 +106,10 @@ struct RootView: View {
                 Image(systemName: "sparkles")
             }
             .tag(Destination.home)
+
+            Label("Disk Explorer", systemImage: "folder.fill")
+                .help("Every folder in your home, biggest first")
+                .tag(Destination.explorer)
 
             let reclaim = Category.displayOrder.filter { $0.countsAsReclaimable && model.total($0) > 0 }
             if !reclaim.isEmpty {

@@ -7,24 +7,29 @@ let usage = """
     USAGE
       kachra scan  [--only <categories>] [--top <n>] [--idle-days <n>] [--json]
       kachra clean [--id <id>]... [--category <c>] [--safety safe|review] [--yes]
+      kachra explore [<folder>] [--top <n>]
 
     CATEGORIES
       appCaches, logs, toolCaches, models, largeFiles, projectArtifacts, duplicates, apps, trash
 
     `scan` saves its report to ~/Library/Application Support/KachraClean/last-scan.json.
     `clean` works from that report. Without --yes it only shows what would move to the Trash.
+    `explore` lists a folder's contents by size (default: your home folder). A + means part of
+    an item couldn't be read, so it is at least that big.
     """
 
 struct Args {
     var command = ""
     var values: [String: [String]] = [:]
     var flags: Set<String> = []
+    /// Arguments that aren't options, e.g. the folder for `explore`.
+    var operands: [String] = []
 
     init(_ raw: [String]) {
         var it = raw.makeIterator()
         command = it.next() ?? ""
         while let arg = it.next() {
-            guard arg.hasPrefix("--") else { continue }
+            guard arg.hasPrefix("--") else { operands.append(arg); continue }
             let key = String(arg.dropFirst(2))
             if ["json", "yes", "help"].contains(key) {
                 flags.insert(key)
@@ -133,6 +138,28 @@ do {
         print(dryRun
             ? "\nDry run: \(selected.count) findings, \(bytes(freed)). Re-run with --yes to move them to the Trash."
             : "\nDone. Up to \(bytes(freed)) is now in the Trash; empty the Trash to free it.")
+
+    case "explore":
+        let folder = args.operands.first.map { URL(fileURLWithPath: $0) }
+            ?? FileManager.default.homeDirectoryForCurrentUser
+        let started = Date()
+        let sizer = DiskSizer()
+        let entries = DiskSizer.children(of: folder)
+        let sizes = await withTaskGroup(of: (String, DiskSizer.Size).self) { group in
+            for entry in entries { group.addTask { (entry.id, await sizer.measure(entry.url)) } }
+            var sizes: [String: DiskSizer.Size] = [:]
+            for await (id, size) in group { sizes[id] = size }
+            return sizes
+        }
+        let rows = entries.compactMap { e in sizes[e.id].map { (e, $0) } }.sorted { $0.1.bytes > $1.1.bytes }
+        let total = rows.reduce(0) { $0 + $1.1.bytes }
+        for (entry, size) in rows.prefix(args.int("top") ?? 25) {
+            let shown = bytes(size.bytes) + (size.complete ? " " : "+")
+            print("  \(pad(shown, 12)) \(entry.name)\(entry.isDirectory ? "/" : "")")
+        }
+        if rows.count > (args.int("top") ?? 25) { print("  … \(rows.count - (args.int("top") ?? 25)) more") }
+        let complete = rows.allSatisfy { $0.1.complete }
+        print("\n\(folder.path): \(bytes(total))\(complete ? "" : "+") in \(String(format: "%.1f", Date().timeIntervalSince(started)))s")
 
     default:
         print(usage)

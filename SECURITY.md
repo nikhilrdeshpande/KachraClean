@@ -27,6 +27,8 @@ Examples of what counts:
   - SSH, GPG and cloud-provider credential folders, and token or key files;
   - items that don't match their category. For example, an "app cache" must be inside
     `Library/Caches`, and a "large file" must be a single file.
+- Items picked by hand in the Disk Explorer get the same location checks (there is no category to
+  match) and a confirmation that says whether KachraClean recognises the item.
 - Values that come from other software are never used as paths. App bundle IDs, app names and
   model manifests are validated first, and symbolic links that lead outside a model cache are ignored.
 - The app is built with the hardened runtime, which blocks code injection into a process that holds

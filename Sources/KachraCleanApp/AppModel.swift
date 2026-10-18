@@ -29,6 +29,8 @@ final class AppModel {
         var findings: [Finding]
         var outcomes: [Cleaner.Outcome]
         var bytes: Int64
+        /// Bytes each trashed path held, so the Disk Explorer can shrink and grow folders on Undo.
+        var sizes: [String: Int64] = [:]
     }
 
     struct Toast: Identifiable, Equatable {
@@ -40,12 +42,24 @@ final class AppModel {
         let id = UUID()
         var message: String
         var undo: Undo?
+        var failed = false
     }
 
     // MARK: State
 
     var phase: Phase = .idle
-    var report: ScanReport?
+    var report: ScanReport? {
+        didSet { findingIndex = FindingIndex(visibleFindings) }
+    }
+    /// Which suggestions sit at or inside a path, for the Disk Explorer.
+    private(set) var findingIndex = FindingIndex()
+    let explorer = ExplorerModel()
+    /// True while the Disk Explorer is on screen: ⌘⌫ then acts on the explorer's selection.
+    var onExplorer = false
+    /// A screen to switch to, e.g. from "Show in Disk Explorer" or a suggestion in the explorer.
+    var navigationRequest: Destination?
+    /// Path checks for the explorer's Move to Trash button (the cleaner checks again when moving).
+    private let guardRails = Cleaner(dryRun: true)
     var selection: Set<String> = []
     /// The category on screen, or nil on the Overview. Cleaning acts on what's in view: inside a
     /// category only that category's selection moves, so a selection made elsewhere never rides along.
@@ -81,7 +95,10 @@ final class AppModel {
     /// File shown in Quick Look.
     var previewURL: URL?
     private(set) var ignoredPaths: Set<String> {
-        didSet { UserDefaults.standard.set(Array(ignoredPaths), forKey: "ignoredPaths") }
+        didSet {
+            UserDefaults.standard.set(Array(ignoredPaths), forKey: "ignoredPaths")
+            findingIndex = FindingIndex(visibleFindings)
+        }
     }
 
     /// How long a saved scan stays trustworthy enough to pre-select from.
@@ -103,6 +120,7 @@ final class AppModel {
             selection = saved.createdAt.timeIntervalSinceNow > -Self.freshScanAge ? defaultSelection(saved) : []
             phase = .ready
         }
+        findingIndex = FindingIndex(visibleFindings)
     }
 
     // MARK: Derived values
@@ -286,8 +304,10 @@ final class AppModel {
             selection.subtract(doneIDs)
             if let f = focused, doneIDs.contains(f) { focused = nil }
             persist()
+            let sizes = trashedSizes(trashed, of: chosen)
+            for (path, bytes) in sizes { explorer.removed(path, bytes: bytes) }
             lastClean = CleanRecord(findings: chosen.filter { touchedIDs.contains($0.id) }, outcomes: trashed,
-                                    bytes: freed)
+                                    bytes: freed, sizes: sizes)
             let skipped = failedIDs.count
             showToast(
                 "Moved \(Format.bytes(freed)) to the Trash" + (skipped > 0 ? " · \(skipped) skipped" : ""),
@@ -297,9 +317,50 @@ final class AppModel {
         }
     }
 
+    /// Bytes per trashed path: measured by the explorer when known, else the finding's size split
+    /// evenly across its paths.
+    private func trashedSizes(_ outcomes: [Cleaner.Outcome], of findings: [Finding]) -> [String: Int64] {
+        var sizes: [String: Int64] = [:]
+        for outcome in outcomes {
+            guard let finding = findings.first(where: { $0.id == outcome.findingID }) else { continue }
+            sizes[outcome.path] = explorer.knownSize(of: outcome.path)
+                ?? finding.bytes / Int64(max(finding.paths.count, 1))
+        }
+        return sizes
+    }
+
+    /// Moves an item picked in the Disk Explorer to the Trash. Suggestions inside it leave the
+    /// results; Undo brings both back.
+    func trashFromExplorer(_ row: ExplorerModel.Row) {
+        guard phase != .cleaning, !isScanning else { return }
+        let previous = phase
+        let url = row.url
+        phase = .cleaning
+        Task {
+            let outcomes = await Task.detached { Cleaner(dryRun: false).trash([url]) }.value
+            phase = previous
+            guard let outcome = outcomes.first, outcome.trashedTo != nil else {
+                showToast("\(row.entry.name) wasn't moved: \(outcomes.first?.error ?? "unknown error")", failed: true)
+                return
+            }
+            let path = url.path
+            let inside = { (p: String) in p == path || p.hasPrefix(path + "/") }
+            let gone = report?.findings.filter { $0.paths.allSatisfy(inside) } ?? []
+            let goneIDs = Set(gone.map(\.id))
+            report?.findings.removeAll { goneIDs.contains($0.id) }
+            selection.subtract(goneIDs)
+            if let f = focused, goneIDs.contains(f) { focused = nil }
+            persist()
+            explorer.removed(path, bytes: row.bytes)
+            lastClean = CleanRecord(findings: gone, outcomes: [outcome], bytes: row.bytes, sizes: [path: row.bytes])
+            showToast("Moved \(row.entry.name) (\(Format.bytes(row.bytes))) to the Trash", undo: .clean)
+        }
+    }
+
     func undoLastClean() {
-        guard let record = lastClean, phase == .ready else { return }
+        guard let record = lastClean, phase != .cleaning, !isScanning else { return }
         let restored = Cleaner().restore(record.outcomes)
+        for outcome in restored { explorer.restored(outcome.path, bytes: record.sizes[outcome.path] ?? 0) }
         let restoredIDs = Set(restored.map(\.findingID))
         let listed = Set(report?.findings.map(\.id) ?? [])
         let back = record.findings.filter { restoredIDs.contains($0.id) && !listed.contains($0.id) }
@@ -353,11 +414,11 @@ final class AppModel {
 
     // MARK: Helpers
 
-    func showToast(_ message: String, undo: Toast.Undo? = nil) {
-        toast = Toast(message: message, undo: undo)
+    func showToast(_ message: String, undo: Toast.Undo? = nil, failed: Bool = false) {
+        toast = Toast(message: message, undo: undo, failed: failed)
         toastTask?.cancel()
         toastTask = Task {
-            try? await Task.sleep(for: .seconds(undo != nil ? 12 : 4))
+            try? await Task.sleep(for: .seconds(undo != nil || failed ? 12 : 4))
             if !Task.isCancelled { toast = nil }
         }
     }
@@ -380,6 +441,30 @@ final class AppModel {
     func preview(_ finding: Finding) {
         guard canPreview(finding), let path = finding.paths.first else { return }
         previewURL = URL(fileURLWithPath: path)
+    }
+
+    /// Opens the Disk Explorer at a finding's first location.
+    func showInExplorer(_ finding: Finding) {
+        guard let path = finding.paths.first else { return }
+        explorer.start(avoidingProtected: !hasFullDiskAccess)
+        explorer.reveal(URL(fileURLWithPath: path))
+        navigationRequest = .explorer
+    }
+
+    /// Why an explorer item can't go to the Trash, or nil when it can.
+    func explorerRefusal(_ row: ExplorerModel.Row) -> String? {
+        guardRails.refusal(for: row.url, category: nil)
+    }
+
+    /// ⌘⌫ in the explorer: asks to move the selected item to the Trash.
+    func requestExplorerTrash() {
+        guard let row = explorer.selectedRow, explorerRefusal(row) == nil else { return }
+        explorer.confirmTrash = row
+    }
+
+    var canTrashExplorerSelection: Bool {
+        guard let row = explorer.selectedRow, phase != .cleaning, !isScanning else { return false }
+        return explorerRefusal(row) == nil
     }
 
     func reveal(_ finding: Finding) {
