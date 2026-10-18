@@ -59,10 +59,7 @@ public struct LargeFileScanner: Sendable {
         let lastOpened = Self.lastOpened(url)
         var details = ["kind": kind.rawValue, "folder": PathUtil.display(url.deletingLastPathComponent(), home: home)]
         let opened = lastOpened.map { "Last opened \(Self.dateFormatter.string(from: $0))." } ?? "macOS has no record of it being opened."
-        if let lastOpened {
-            let days = Int(Date().timeIntervalSince(lastOpened) / 86_400)
-            details["lastActivity"] = days == 0 ? "today" : "\(days) days ago"
-        }
+        if let lastOpened { details["lastActivity"] = Activity.describe(lastOpened) }
         let advice: String
         switch kind {
         case .video, .audio: advice = "Your own media; only you can tell if you still need it. Consider moving it to an external drive."
@@ -91,10 +88,7 @@ public struct LargeFileScanner: Sendable {
         let isFile = (try? folder.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true
         var details = ["kind": isFile ? "Model weights file" : "Model weights (outside managed caches)",
                        "folder": PathUtil.display(folder, home: home), "files": String(files.count)]
-        if let lastUsed {
-            let days = Int(Date().timeIntervalSince(lastUsed) / 86_400)
-            details["lastActivity"] = days == 0 ? "today" : "\(days) days ago"
-        }
+        if let lastUsed { details["lastActivity"] = Activity.describe(lastUsed) }
         return Finding(
             category: .models,
             title: Self.displayName(for: folder),
@@ -195,12 +189,20 @@ public struct LargeFileScanner: Sendable {
         return .other
     }
 
-    /// Groups sharded weights: `<model>/transformer/0.safetensors` belongs to `<model>`.
+    static let componentFolders: Set<String> = ["transformer", "text_encoder", "text_encoder_2", "vae", "unet",
+                                                "tokenizer", "tokenizer_2", "scheduler", "image_encoder"]
+
+    /// Groups sharded weights: `<model>/transformer/0.safetensors` belongs to `<model>`, but only
+    /// when `<model>` really is a model folder (a `model_index.json`, or at least two component
+    /// folders). Otherwise a stray `vae/` inside a documents folder would claim the whole folder.
     static func modelFolder(for file: URL) -> URL? {
         let parent = file.deletingLastPathComponent()
-        let componentFolders: Set<String> = ["transformer", "text_encoder", "text_encoder_2", "vae", "unet",
-                                             "tokenizer", "tokenizer_2", "scheduler", "image_encoder"]
-        return componentFolders.contains(parent.lastPathComponent.lowercased()) ? parent.deletingLastPathComponent() : nil
+        guard componentFolders.contains(parent.lastPathComponent.lowercased()) else { return nil }
+        let model = parent.deletingLastPathComponent()
+        let fm = FileManager()
+        if fm.fileExists(atPath: model.appendingPathComponent("model_index.json").path) { return model }
+        let siblings = (try? fm.contentsOfDirectory(atPath: model.path)) ?? []
+        return siblings.filter { componentFolders.contains($0.lowercased()) }.count >= 2 ? model : nil
     }
 
     /// "model.safetensors" says nothing; name it after the nearest meaningful folder instead.

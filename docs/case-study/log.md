@@ -105,3 +105,15 @@ Implementation notes / bugs found by screenshot review:
 - **Ollama, one model at a time**, from its JSON manifests and content-addressed blobs (same exclusive/shared logic).
 - **Large files** via a synchronous Spotlight query (`kMDItemFSSize > 500 MB` scoped to home: 33 hits in 0.12 s), with a folder-walk fallback. Classified by kind (video, audio, disk image, archive, dataset, VM disk); always `review`; Quick Look thumbnails and preview. Model weights found this way (ComfyUI checkpoints, mflux) go to AI models instead, grouped per model folder for sharded models.
 - Effect on the test Mac: AI models 37.7 GB → 70.9 GB (loose weights were previously invisible); Large files 12.5 GB.
+
+## 2026-10-18 — Security sweep before going public
+- **Repository:** history scanned for secrets, tokens, personal paths and emails: clean. Every commit uses the GitHub no-reply address; GitHub secret scanning and push protection are on; private vulnerability reporting enabled; `SECURITY.md` added. One leak found: the icon's source PNG carried the image model's generation metadata (prompt and a local path containing the macOS username). It is now stripped from all images; older commits still contain it.
+- **Real bugs found by reading the scanners as an attacker would:**
+  - `~/.cache` children were reported as *safe* caches. On the test Mac that pre-selected the Hugging Face login token (`~/.cache/huggingface/token`). Now only folders are reported, `~/.cache` folders are *review*, and the datasets cache is back to *review* through its own rule.
+  - A Hugging Face snapshot symlink pointing outside the cache would have counted its target (any file of yours) as one of the model's blobs, and trashed it with the model. Now only targets inside the cache count.
+  - Ollama blob paths were built from manifest digests without validation (`../` possible). Now only `sha256:<64 hex>` is accepted.
+  - App bundle IDs come from the app's own Info.plist and were used to build "related data" paths. A crafted ID could point into Documents. Bundle IDs and app names are now validated, and shared vendor folders are never claimed by name.
+  - A weights file inside any folder named `vae`/`transformer` made the *parent* folder the thing to remove. Grouping now requires a real model folder.
+  - The cache-folder symlink case could make in-use model blobs look "unreferenced" (safe). Paths are now resolved consistently.
+- **Defence in depth:** the cleaner no longer trusts findings. It refuses credentials, keychains, mail and cloud folders, and anything that doesn't match its category. The saved report is `0600`. The app is signed with the hardened runtime. Undo now covers partly cleaned items, and scans older than a day are no longer pre-selected.
+- Tests: 14 → 23, including one per bug above.

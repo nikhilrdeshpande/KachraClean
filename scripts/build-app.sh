@@ -46,5 +46,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-codesign --force --sign - "$APP" >/dev/null
+# Hardened runtime: blocks code injection (e.g. DYLD_INSERT_LIBRARIES) into an app that may
+# hold Full Disk Access.
+codesign --force --options runtime --sign - "$APP" >/dev/null
 echo "Built $APP"

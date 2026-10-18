@@ -105,13 +105,14 @@ public struct Scanner: Sendable {
             await timed(.knownLocations) { await RuleScanner(rules: rules, home: home, avoidProtected: options.avoidProtectedLocations).scan() }
         }
         let models = ModelScanner(home: home)
+        // Locations owned by rules or the model scanner; other scanners skip them.
+        let claimed = rules.claimedPaths(home: home).union(models.claimedPaths)
         if wanted.contains(.models) {
             await timed(.models) { await models.scan() }
         }
         if !wanted.isDisjoint(with: [.appCaches, .toolCaches]) {
             await timed(.appCaches) {
-                await AppCacheScanner(home: home, claimed: rules.claimedPaths(home: home).union(models.claimedPaths),
-                                avoidProtected: options.avoidProtectedLocations).scan()
+                await AppCacheScanner(home: home, claimed: claimed, avoidProtected: options.avoidProtectedLocations).scan()
             }
         }
         if wanted.contains(.projectArtifacts) {
@@ -124,9 +125,8 @@ public struct Scanner: Sendable {
             await timed(.duplicates) { await DuplicateScanner(roots: [options.downloads]).scan() }
         }
         if !wanted.isDisjoint(with: [.largeFiles, .models]) {
-            let excluded = rules.claimedPaths(home: home).union(models.claimedPaths)
             await timed(.largeFiles) {
-                await LargeFileScanner(home: home, minimumBytes: options.largeFileBytes, excluded: excluded).scan()
+                await LargeFileScanner(home: home, minimumBytes: options.largeFileBytes, excluded: claimed).scan()
             }
         }
         if wanted.contains(.apps) {
@@ -135,10 +135,17 @@ public struct Scanner: Sendable {
         }
 
         try Task.checkCancellation()
-        let elsewhere = findings.filter { $0.category != .largeFiles && $0.category != .apps }.flatMap(\.paths)
-        findings.removeAll { f in
-            f.category == .largeFiles && f.paths.allSatisfy { p in elsewhere.contains { p == $0 || p.hasPrefix($0 + "/") } }
+        // A large file already covered by another finding (e.g. inside a model folder) is listed once.
+        let elsewhere = Set(findings.filter { $0.category != .largeFiles && $0.category != .apps }.flatMap(\.paths))
+        func covered(_ path: String) -> Bool {
+            var url = URL(fileURLWithPath: path)
+            while url.path != "/" {
+                if elsewhere.contains(url.path) { return true }
+                url.deleteLastPathComponent()
+            }
+            return false
         }
+        findings.removeAll { $0.category == .largeFiles && $0.paths.allSatisfy(covered) }
         findings = findings
             .filter { wanted.contains($0.category) }
             .sorted { $0.bytes > $1.bytes }
@@ -162,8 +169,12 @@ extension ScanReport {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try FileManager().createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        // The report lists paths from all over the home folder: readable by this user only.
+        let fm = FileManager()
+        try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true,
+                               attributes: [.posixPermissions: 0o700])
         try encoder.encode(self).write(to: url, options: .atomic)
+        try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 
     public static var defaultLocation: URL {

@@ -88,10 +88,7 @@ public struct ModelScanner: Sendable {
             if !shared.isEmpty {
                 details["shared"] = "\(shared.count) files (\(ByteCountFormatter.string(fromByteCount: shared.reduce(0) { $0 + blob($1).bytes }, countStyle: .file))) shared with other models, kept"
             }
-            if let lastUsed {
-                let days = Int(Date().timeIntervalSince(lastUsed) / 86_400)
-                details["lastActivity"] = days == 0 ? "today" : "\(days) days ago"
-            }
+            if let lastUsed { details["lastActivity"] = Activity.describe(lastUsed) }
             guard bytes > 0 else { continue }
             result.append(Finding(
                 category: .models,
@@ -142,15 +139,21 @@ public struct ModelScanner: Sendable {
             let id = name[sep.upperBound...].replacingOccurrences(of: "--", with: "/")
             allBlobs.formUnion(Self.files(in: repo.appendingPathComponent("blobs")))
 
-            // Every file in every snapshot resolves (through symlinks) to a blob.
+            // Every file in every snapshot resolves (through symlinks) to a blob. Links that lead
+            // outside the cache (a user's own files) are never counted, so they can't be trashed.
             var blobs = Set<String>()
+            var external = 0
             let snapshots = repo.appendingPathComponent("snapshots")
             let revisions = (try? fm.contentsOfDirectory(atPath: snapshots.path))?.count ?? 0
+            let insideCache = [hub.resolvedPath + "/blobs/", repo.resolvedPath + "/"]
             if let walker = fm.enumerator(at: snapshots, includingPropertiesForKeys: [.isRegularFileKey], options: []) {
                 while let file = walker.nextObject() as? URL {
                     let real = file.resolvingSymlinksInPath()
-                    if (try? real.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true {
+                    guard (try? real.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true else { continue }
+                    if insideCache.contains(where: real.path.hasPrefix) {
                         blobs.insert(real.path)
+                    } else {
+                        external += 1
                     }
                 }
             }
@@ -158,6 +161,7 @@ public struct ModelScanner: Sendable {
             var details = ["repo": id, "kind": singular == "model" ? "Hugging Face model" : "Hugging Face \(singular)",
                            "revisions": String(revisions)]
             if let cli { details["command"] = "\(cli.lastPathComponent) cache rm \(singular)/\(id)" }
+            if external > 0 { details["external"] = "\(external) linked files outside the cache, kept" }
             entries.append(Entry(
                 title: id,
                 ownPaths: [repo],
@@ -169,7 +173,7 @@ public struct ModelScanner: Sendable {
             ))
         }
         // Blobs inside repo folders are already covered by removing the repo folder itself.
-        let inRepoBlob: (String) -> Bool = { path in entries.contains { e in e.ownPaths.contains { path.hasPrefix($0.path + "/") } } }
+        let inRepoBlob: (String) -> Bool = { path in entries.contains { e in e.ownPaths.contains { path.hasPrefix($0.resolvedPath + "/") } } }
         for i in entries.indices {
             entries[i].usage = entries[i].blobs
             entries[i].blobs = entries[i].blobs.filter { !inRepoBlob($0) }
@@ -186,7 +190,7 @@ public struct ModelScanner: Sendable {
     func ollama() -> [Finding] {
         let root = ollamaModels
         let manifests = root.appendingPathComponent("manifests")
-        let blobsDir = root.appendingPathComponent("blobs")
+        let blobsDir = root.appendingPathComponent("blobs").resolvingSymlinksInPath()
         let fm = FileManager()
         guard fm.fileExists(atPath: manifests.path) else { return [] }
 
@@ -207,7 +211,7 @@ public struct ModelScanner: Sendable {
                 let namespace = parts[1], model = parts[2], tag = parts[3]
                 let name = (namespace == "library" ? model : "\(namespace)/\(model)") + ":" + tag
                 let digests = (manifest.layers ?? []).map(\.digest) + [manifest.config?.digest].compactMap { $0 }
-                let blobs = Set(digests.map { blobsDir.appendingPathComponent($0.replacingOccurrences(of: ":", with: "-")).path }
+                let blobs = Set(digests.compactMap(Self.blobName(forDigest:)).map { blobsDir.appendingPathComponent($0).path }
                     .filter { fm.fileExists(atPath: $0) })
                 entries.append(Entry(
                     title: name,
@@ -225,10 +229,21 @@ public struct ModelScanner: Sendable {
 
     // MARK: - Helpers
 
+    /// `sha256:<64 hex>` → the blob's file name. Anything else (including path tricks such as
+    /// `../`) is rejected, since manifests are just JSON files on disk.
+    static func blobName(forDigest digest: String) -> String? {
+        let parts = digest.split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count == 2, parts[0] == "sha256", parts[1].count == 64,
+              parts[1].allSatisfy({ $0.isHexDigit && !$0.isUppercase }) else { return nil }
+        return "sha256-\(parts[1])"
+    }
+
+    /// Files in a blob folder, as resolved paths so they compare equal to resolved symlink targets.
     static func files(in dir: URL) -> [String] {
-        ((try? FileManager().contentsOfDirectory(atPath: dir.path)) ?? [])
+        let resolved = dir.resolvingSymlinksInPath()
+        return ((try? FileManager().contentsOfDirectory(atPath: resolved.path)) ?? [])
             .filter { !$0.hasPrefix(".") }
-            .map { dir.appendingPathComponent($0).path }
+            .map { resolved.appendingPathComponent($0).path }
     }
 
     /// Finds a CLI on PATH or in common user install locations (pipx/uv tools, Homebrew).

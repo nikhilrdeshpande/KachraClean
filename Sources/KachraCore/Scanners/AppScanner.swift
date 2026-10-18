@@ -59,8 +59,7 @@ public struct AppScanner: Sendable {
         let (evidence, lastActivity, unused): (String, Date?, Bool) = {
             switch app.usage {
             case .spotlight(let date):
-                let days = Int(Date().timeIntervalSince(date) / 86_400)
-                return ("Last opened \(df.string(from: date)) (Spotlight).", date, days >= unusedDays)
+                return ("Last opened \(df.string(from: date)) (Spotlight).", date, Activity.days(since: date) >= unusedDays)
             case .runningNow:
                 return ("Running right now.", Date(), false)
             case .noData(let installed):
@@ -129,24 +128,44 @@ public struct AppScanner: Sendable {
     /// Data an app leaves outside its bundle, matched by bundle identifier (and name for
     /// Application Support, where many apps use their display name).
     func relatedData(for app: AppInfo) -> [URL] {
-        guard let id = app.bundleID else { return [] }
+        // Both values come from the app itself (Info.plist, file name), so they're only used as
+        // a single path component, never as a path.
+        guard let id = app.bundleID, Self.isPlainBundleID(id) else { return [] }
         let lib = home.appendingPathComponent("Library")
         var candidates = [
             lib.appendingPathComponent("Containers/\(id)"),
             lib.appendingPathComponent("Application Support/\(id)"),
-            lib.appendingPathComponent("Application Support/\(app.name)"),
             lib.appendingPathComponent("Caches/\(id)"),
             lib.appendingPathComponent("HTTPStorages/\(id)"),
             lib.appendingPathComponent("WebKit/\(id)"),
             lib.appendingPathComponent("Saved Application State/\(id).savedState"),
             lib.appendingPathComponent("Preferences/\(id).plist"),
-            lib.appendingPathComponent("Logs/\(app.name)"),
         ]
+        if Self.isOwnFolderName(app.name) {
+            candidates += [lib.appendingPathComponent("Application Support/\(app.name)"),
+                           lib.appendingPathComponent("Logs/\(app.name)")]
+        }
         // Group containers are prefixed with a team ID: <TEAMID>.<id> or <TEAMID>.group.<id>.
         let groups = avoidProtected ? [] : (try? FileManager().contentsOfDirectory(atPath: lib.appendingPathComponent("Group Containers").path)) ?? []
         candidates += groups.filter { $0.hasSuffix(".\(id)") }
             .map { lib.appendingPathComponent("Group Containers/\($0)") }
         if avoidProtected { candidates.removeAll { PathUtil.isProtected($0, home: home) } }
         return Array(Set(candidates.filter(PathUtil.exists)))
+    }
+
+    /// Reverse-DNS identifiers only: letters, digits, dots and dashes, with no empty or `..` parts.
+    static func isPlainBundleID(_ id: String) -> Bool {
+        let parts = id.split(separator: ".", omittingEmptySubsequences: false)
+        return parts.count >= 2 && id.count <= 255
+            && parts.allSatisfy { !$0.isEmpty && $0.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") } }
+    }
+
+    /// An app name usable as a folder name that belongs to that app alone. Vendor folders shared
+    /// by several apps (Application Support/Google, .../Microsoft) are never claimed by name.
+    static func isOwnFolderName(_ name: String) -> Bool {
+        let shared: Set<String> = ["google", "microsoft", "adobe", "apple", "jetbrains", "autodesk", "mozilla",
+                                   "oracle", "logitech", "unity", "epic games", "crashreporter"]
+        return !name.isEmpty && !name.hasPrefix(".") && !name.contains("/") && !name.contains(":")
+            && !shared.contains(name.lowercased())
     }
 }

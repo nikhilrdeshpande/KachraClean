@@ -296,6 +296,17 @@
       "reason": "Chunk cache used while downloading. Models in the hub folder do not depend on it."
     },
     {
+      "id": "huggingface-datasets",
+      "title": "Hugging Face datasets cache",
+      "owner": "Hugging Face",
+      "category": "models",
+      "paths": [
+        "~/.cache/huggingface/datasets"
+      ],
+      "safety": "review",
+      "reason": "Processed copies of datasets made by the datasets library. Re-created on the next load, which can take a long time for large datasets."
+    },
+    {
       "id": "lmstudio-models",
       "title": "LM Studio models",
       "owner": "LM Studio",

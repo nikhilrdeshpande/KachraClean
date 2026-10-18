@@ -99,13 +99,7 @@ public struct ProjectScanner: Sendable {
 
     func finding(for hit: Hit, bytes: Int64, project: ProjectInfo) -> Finding {
         let idle = project.idleDays.map { $0 >= options.idleDays } ?? true
-        let ago = project.idleDays.map { days -> String in
-            switch days {
-            case 0: "today"
-            case 1: "yesterday"
-            default: "\(days) days ago"
-            }
-        } ?? "an unknown time ago"
+        let ago = project.idleDays.map(Activity.describe(days:)) ?? "an unknown time ago"
         var details = ["project": PathUtil.display(hit.project, home: home), "kind": hit.kind.rawValue,
                        "lastActivity": ago]
         if let lock = project.lockfile { details["lockfile"] = lock }
@@ -231,6 +225,12 @@ public struct ProjectScanner: Sendable {
         return true
     }
 
+    /// Folder names classify() can recognise; virtualenvs are recognised by `pyvenv.cfg` instead.
+    static let artifactNames: Set<String> = [
+        "node_modules", "__pycache__", ".next", ".nuxt", ".svelte-kit", ".turbo", ".parcel-cache", ".vite", ".expo",
+        "target", "Pods", "build", ".gradle",
+    ]
+
     /// Recognises an artifact folder by its name *and* a marker that proves what it is.
     static func classify(_ url: URL) -> Kind? {
         let name = url.lastPathComponent
@@ -270,7 +270,7 @@ struct ProjectInfo: Sendable {
     var lastActivity: Date?
 
     var idleDays: Int? {
-        lastActivity.map { Int(Date().timeIntervalSince($0) / 86_400) }
+        lastActivity.map { Activity.days(since: $0) }
     }
 
     var installCommand: String {

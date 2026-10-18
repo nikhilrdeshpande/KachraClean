@@ -221,9 +221,123 @@ let longAgo = Date().addingTimeInterval(-200 * 86_400)
         #expect(LargeFileScanner.kind(of: URL(fileURLWithPath: "/x/data.parquet")) == .dataset)
         #expect(LargeFileScanner.kind(of: URL(fileURLWithPath: "/x/w.safetensors")) == .modelWeights)
         #expect(LargeFileScanner.kind(of: URL(fileURLWithPath: "/x/notes.txt")) == .other)
-        #expect(LargeFileScanner.modelFolder(for: URL(fileURLWithPath: "/m/flux/transformer/0.safetensors"))?.path == "/m/flux")
         #expect(LargeFileScanner.modelFolder(for: URL(fileURLWithPath: "/c/checkpoints/x.safetensors")) == nil)
         #expect(LargeFileScanner.displayName(for: URL(fileURLWithPath: "/a/qwen-seed1/model/model.safetensors"))
             == "qwen-seed1 · model.safetensors")
+    }
+}
+
+@Suite struct SecurityTests {
+    @Test func cleanerRefusesCredentialsAndProtectedAreas() throws {
+        let box = try Sandbox()
+        let cleaner = Cleaner(home: box.root, dryRun: true)
+        for path in [".cache/huggingface/token", ".ssh/id_ed25519", "Library/Keychains/login.keychain-db",
+                     "Library/Mobile Documents/com~apple~CloudDocs/big.mov", "code/certs/server.pem"] {
+            try box.file(path)
+            #expect(cleaner.refusal(for: box.root.appendingPathComponent(path), category: .models) != nil, "\(path)")
+        }
+    }
+
+    @Test func cleanerChecksEachCategoryCleansItsOwnKind() throws {
+        let box = try Sandbox()
+        let cleaner = Cleaner(home: box.root, dryRun: true)
+        try box.file("Documents/report/a.txt")
+        try box.file("proj/package.json")
+        try box.file("proj/node_modules/x/index.js")
+        try box.file("Library/Logs/app/log.txt")
+        func refused(_ path: String, _ category: KachraCore.Category) -> Bool {
+            cleaner.refusal(for: box.root.appendingPathComponent(path), category: category) != nil
+        }
+        #expect(refused("Documents/report", .appCaches))
+        #expect(refused("Documents/report", .projectArtifacts))
+        #expect(!refused("proj/node_modules", .projectArtifacts))
+        #expect(refused("Documents/report", .largeFiles), "large files are files, never folders")
+        #expect(!refused("Documents/report/a.txt", .largeFiles))
+        #expect(!refused("Library/Logs/app", .logs))
+        #expect(refused("Library/Logs/app", .appCaches))
+        #expect(refused("Documents/report", .apps))
+        #expect(cleaner.refusal(for: URL(fileURLWithPath: "/Applications/A.app/Contents/Helper.app"), category: .apps) != nil)
+    }
+
+    @Test func cacheScannerSkipsTokensAndReviewsDotCache() async throws {
+        let box = try Sandbox()
+        try box.file("Library/Caches/com.example.editor/data", bytes: 8_192)
+        try box.file(".cache/huggingface/token")
+        try box.file(".cache/huggingface/stored_tokens")
+        try box.file(".cache/huggingface/hub/models--a--b/x")
+        try box.file(".cache/sometool/blob", bytes: 8_192)
+        let hub = box.root.appendingPathComponent(".cache/huggingface/hub").path
+        let findings = await AppCacheScanner(home: box.root, claimed: [hub]).scan()
+        let paths = findings.flatMap(\.paths)
+        #expect(!paths.contains { $0.hasSuffix("token") || $0.hasSuffix("stored_tokens") })
+        #expect(findings.first { $0.paths.first?.hasSuffix(".cache/sometool") == true }?.safety == .review)
+        #expect(findings.first { $0.paths.first?.hasSuffix("com.example.editor") == true }?.safety == .safe)
+    }
+
+    @Test func huggingFaceIgnoresLinksOutsideTheCache() async throws {
+        let box = try Sandbox()
+        let mine = try box.file("Documents/thesis.pdf", bytes: 8_192)
+        let snap = box.root.appendingPathComponent(".cache/huggingface/hub/models--org--m/snapshots/r1")
+        try FileManager.default.createDirectory(at: snap, withIntermediateDirectories: true)
+        try box.file(".cache/huggingface/hub/blobs/w", bytes: 8_192)
+        try FileManager.default.createSymbolicLink(at: snap.appendingPathComponent("w.bin"),
+            withDestinationURL: box.root.appendingPathComponent(".cache/huggingface/hub/blobs/w"))
+        try FileManager.default.createSymbolicLink(at: snap.appendingPathComponent("notes.pdf"), withDestinationURL: mine)
+        let findings = await ModelScanner(home: box.root, environment: [:]).scan()
+        let model = try #require(findings.first { $0.title == "org/m" })
+        #expect(!findings.flatMap(\.paths).contains { $0.hasSuffix("thesis.pdf") })
+        #expect(model.paths.contains { $0.hasSuffix("blobs/w") })
+        #expect(model.details["external"] != nil)
+    }
+
+    @Test func ollamaDigestsCannotEscapeTheBlobFolder() async throws {
+        let box = try Sandbox()
+        let hex = String(repeating: "a", count: 64)
+        #expect(ModelScanner.blobName(forDigest: "sha256:\(hex)") == "sha256-\(hex)")
+        #expect(ModelScanner.blobName(forDigest: "sha256:../../../Documents/x") == nil)
+        #expect(ModelScanner.blobName(forDigest: "../../Documents") == nil)
+
+        try box.file("Documents/x", bytes: 8_192)
+        let manifest = box.root.appendingPathComponent(".ollama/models/manifests/registry/library/evil/latest")
+        try FileManager.default.createDirectory(at: manifest.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(#"{"layers":[{"digest":"sha256:../../../../Documents/x"}]}"#.utf8).write(to: manifest)
+        let findings = await ModelScanner(home: box.root, environment: [:]).scan()
+        #expect(!findings.flatMap(\.paths).contains { $0.hasSuffix("Documents/x") })
+    }
+
+    @Test func appIdentifiersAreUsedOnlyAsPlainNames() {
+        #expect(AppScanner.isPlainBundleID("com.example.App-2"))
+        #expect(!AppScanner.isPlainBundleID("../../Documents/Work"))
+        #expect(!AppScanner.isPlainBundleID("com..example"))
+        #expect(!AppScanner.isPlainBundleID("single"))
+        #expect(AppScanner.isOwnFolderName("Visual Studio Code"))
+        #expect(!AppScanner.isOwnFolderName("Google"))
+        #expect(!AppScanner.isOwnFolderName("a/b"))
+    }
+
+    @Test func strayComponentFolderDoesNotClaimItsParent() throws {
+        let box = try Sandbox()
+        try box.file("Documents/work/vae/x.safetensors")
+        try box.file("Documents/work/notes.txt")
+        #expect(LargeFileScanner.modelFolder(for: box.root.appendingPathComponent("Documents/work/vae/x.safetensors")) == nil)
+        try box.file("models/flux/transformer/0.safetensors")
+        try box.file("models/flux/model_index.json")
+        #expect(LargeFileScanner.modelFolder(for: box.root.appendingPathComponent("models/flux/transformer/0.safetensors"))?
+            .lastPathComponent == "flux")
+    }
+
+    @Test func savedReportIsPrivate() throws {
+        let box = try Sandbox()
+        let url = box.root.appendingPathComponent("state/last-scan.json")
+        try ScanReport(findings: [], volume: nil, timings: [:]).save(to: url)
+        let mode = try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? Int
+        #expect(mode == 0o600)
+    }
+
+    @Test func activityWording() {
+        #expect(Activity.describe(days: 0) == "today")
+        #expect(Activity.describe(days: 1) == "yesterday")
+        #expect(Activity.describe(days: 9) == "9 days ago")
+        #expect(Activity.days(since: Date().addingTimeInterval(3_600)) == 0)
     }
 }

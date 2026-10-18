@@ -131,3 +131,20 @@ public struct ScanReport: Codable, Sendable {
             .reduce(0) { $0 + $1.bytes }
     }
 }
+
+/// How findings describe recent activity: "today", "yesterday", "12 days ago".
+enum Activity {
+    static func days(since date: Date, now: Date = Date()) -> Int {
+        max(0, Int(now.timeIntervalSince(date) / 86_400))
+    }
+
+    static func describe(days: Int) -> String {
+        switch days {
+        case 0: "today"
+        case 1: "yesterday"
+        default: "\(days) days ago"
+        }
+    }
+
+    static func describe(_ date: Date) -> String { describe(days: days(since: date)) }
+}

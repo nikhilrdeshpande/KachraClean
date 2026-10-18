@@ -76,6 +76,9 @@ final class AppModel {
         didSet { UserDefaults.standard.set(Array(ignoredPaths), forKey: "ignoredPaths") }
     }
 
+    /// How long a saved scan stays trustworthy enough to pre-select from.
+    static let freshScanAge: TimeInterval = 24 * 3_600
+
     private var scanTask: Task<Void, Never>?
     private var toastTask: Task<Void, Never>?
 
@@ -87,7 +90,9 @@ final class AppModel {
         ignoredPaths = Set(defaults.stringArray(forKey: "ignoredPaths") ?? [])
         if let saved = try? ScanReport.load(from: ScanReport.defaultLocation) {
             report = saved
-            selection = defaultSelection(saved)
+            // Things change: a project idle last week may be active today. Only a recent scan
+            // gets its safe items pre-selected.
+            selection = saved.createdAt.timeIntervalSinceNow > -Self.freshScanAge ? defaultSelection(saved) : []
             phase = .ready
         }
     }
@@ -249,19 +254,22 @@ final class AppModel {
         Task {
             let outcomes = await Task.detached { Cleaner(dryRun: false).clean(chosen) }.value
             let failedIDs = Set(outcomes.filter { $0.error != nil }.map(\.findingID))
-            let done = chosen.filter { !failedIDs.contains($0.id) }
-            let doneIDs = Set(done.map(\.id))
-            let freed = done.reduce(0) { $0 + $1.bytes }
+            // Fully cleaned findings leave the list; partly cleaned ones stay, but every item that
+            // did reach the Trash can still be put back with Undo.
+            let trashed = outcomes.filter { $0.trashedTo != nil }
+            let touchedIDs = Set(trashed.map(\.findingID))
+            let doneIDs = Set(chosen.map(\.id)).subtracting(failedIDs)
+            let freed = chosen.filter { doneIDs.contains($0.id) }.reduce(0) { $0 + $1.bytes }
             report?.findings.removeAll { doneIDs.contains($0.id) }
             selection.subtract(doneIDs)
             if let f = focused, doneIDs.contains(f) { focused = nil }
             persist()
-            lastClean = CleanRecord(findings: done, outcomes: outcomes.filter { doneIDs.contains($0.findingID) },
+            lastClean = CleanRecord(findings: chosen.filter { touchedIDs.contains($0.id) }, outcomes: trashed,
                                     bytes: freed)
             let skipped = failedIDs.count
             showToast(
                 "Moved \(Format.bytes(freed)) to the Trash" + (skipped > 0 ? " · \(skipped) skipped" : ""),
-                canUndo: !done.isEmpty
+                canUndo: !trashed.isEmpty
             )
             phase = .ready
         }
@@ -271,13 +279,14 @@ final class AppModel {
         guard let record = lastClean, phase == .ready else { return }
         let restored = Cleaner().restore(record.outcomes)
         let restoredIDs = Set(restored.map(\.findingID))
-        let back = record.findings.filter { restoredIDs.contains($0.id) }
+        let listed = Set(report?.findings.map(\.id) ?? [])
+        let back = record.findings.filter { restoredIDs.contains($0.id) && !listed.contains($0.id) }
         report?.findings.append(contentsOf: back)
         report?.findings.sort { $0.bytes > $1.bytes }
         selection.formUnion(back.map(\.id))
         persist()
         lastClean = nil
-        showToast("Put back \(back.count) items", canUndo: false)
+        showToast("Put back \(restored.count) items", canUndo: false)
     }
 
     // MARK: Ignore list
