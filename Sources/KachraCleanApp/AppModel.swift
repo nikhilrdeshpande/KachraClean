@@ -53,7 +53,11 @@ final class AppModel {
     }
     /// Which suggestions sit at or inside a path, for the Disk Explorer.
     private(set) var findingIndex = FindingIndex()
-    let explorer = ExplorerModel()
+    let explorer: ExplorerModel
+    /// Past scans and folder sizes, for "what grew since last time".
+    let history: HistoryStore
+    /// What grew since the baseline scan; recomputed when a scan finishes.
+    private(set) var growth: History.Growth?
     /// True while the Disk Explorer is on screen: ⌘⌫ then acts on the explorer's selection.
     var onExplorer = false
     /// A screen to switch to, e.g. from "Show in Disk Explorer" or a suggestion in the explorer.
@@ -108,6 +112,9 @@ final class AppModel {
     private var toastTask: Task<Void, Never>?
 
     init() {
+        let store = HistoryStore()
+        history = store
+        explorer = ExplorerModel(history: store)
         let defaults = UserDefaults.standard
         idleDays = defaults.object(forKey: "idleDays") as? Int ?? 30
         unusedAppDays = defaults.object(forKey: "unusedAppDays") as? Int ?? 180
@@ -121,6 +128,7 @@ final class AppModel {
             phase = .ready
         }
         findingIndex = FindingIndex(visibleFindings)
+        if let report { growth = store.value.growth(of: report) }
     }
 
     // MARK: Derived values
@@ -184,7 +192,8 @@ final class AppModel {
         return Double(done) / Double(steps.count)
     }
 
-    func isSelectable(_ finding: Finding) -> Bool { finding.category != .trash }
+    /// The Trash and explained-only findings (Docker data, which has no paths) can't be cleaned here.
+    func isSelectable(_ finding: Finding) -> Bool { finding.category != .trash && !finding.paths.isEmpty }
 
     func isIgnored(_ finding: Finding) -> Bool {
         finding.paths.contains { ignoredPaths.contains($0) }
@@ -223,6 +232,11 @@ final class AppModel {
                     Task { @MainActor in self.apply(event) }
                 }
                 try? result.save(to: ScanReport.defaultLocation)
+                if !limited {  // a limited scan finds less; comparing it would show false changes
+                    history.value.record(result)
+                    history.save()
+                }
+                growth = history.value.growth(of: result)
                 report = result
                 selection = defaultSelection(result)
                 focused = nil

@@ -10,7 +10,7 @@ let usage = """
       kachra explore [<folder>] [--top <n>]
 
     CATEGORIES
-      appCaches, logs, toolCaches, models, largeFiles, projectArtifacts, duplicates, apps, trash
+      appCaches, logs, toolCaches, models, largeFiles, projectArtifacts, duplicates, installers, apps, trash
 
     `scan` saves its report to ~/Library/Application Support/KachraClean/last-scan.json.
     `clean` works from that report. Without --yes it only shows what would move to the Trash.
@@ -102,7 +102,12 @@ do {
             }
         }
         // Only a full scan replaces the saved report that `clean` and the app work from.
-        if only.isEmpty { try report.save(to: ScanReport.defaultLocation) }
+        if only.isEmpty {
+            try report.save(to: ScanReport.defaultLocation)
+            var history = History.load()
+            history.record(report)
+            try? history.save()
+        }
         if json {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

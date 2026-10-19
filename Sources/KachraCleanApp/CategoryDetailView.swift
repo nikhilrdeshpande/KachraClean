@@ -305,6 +305,29 @@ struct InspectorView: View {
                             }
                         }
                     }
+                    if let commands = f.details["commands"], !commands.isEmpty {
+                        section("Free it with Docker's own commands") {
+                            VStack(alignment: .leading, spacing: 10) {
+                                ForEach(commands.split(separator: "\n").map(String.init), id: \.self) { line in
+                                    let parts = line.split(separator: "\t", maxSplits: 1).map(String.init)
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(parts[0]).font(.callout)
+                                        HStack {
+                                            Text(parts.last ?? "").font(.caption.monospaced()).textSelection(.enabled)
+                                            Spacer()
+                                            Button("Copy") {
+                                                NSPasteboard.general.clearContents()
+                                                NSPasteboard.general.setString(parts.last ?? "", forType: .string)
+                                            }
+                                            .controlSize(.small)
+                                        }
+                                    }
+                                }
+                                Text("Run these in Terminal. KachraClean never runs them for you.")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
                     section(f.paths.count == 1 ? "Location" : "\(f.paths.count) locations") {
                         VStack(alignment: .leading, spacing: 4) {
                             ForEach(f.paths.prefix(8), id: \.self) { p in
@@ -380,6 +403,7 @@ struct InspectorView: View {
             ("git", "Git repo"), ("usage", "Usage"), ("bundleID", "Bundle ID"), ("copies", "Copies"),
             ("keep", "Keeping"), ("folders", "Folders"), ("folder", "Folder"), ("revisions", "Revisions"),
             ("files", "Files"), ("shared", "Shared"), ("external", "Linked files"), ("command", "CLI equivalent"),
+            ("installs", "Installs"), ("source", "Downloaded from"), ("docker", "Docker reports"),
         ]
         var result = labels.compactMap { key, label in
             f.details[key].map { (label, key == "keep" ? Format.path($0) : $0) }

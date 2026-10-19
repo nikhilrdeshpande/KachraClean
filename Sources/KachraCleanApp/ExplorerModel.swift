@@ -35,9 +35,20 @@ final class ExplorerModel {
     var confirmTrash: Row?
     private(set) var avoidProtected = false
     private let sizer = DiskSizer()
+    private let history: HistoryStore
     private var tasks: [String: Task<Void, Never>] = [:]
 
-    init() { root = FileManager.default.homeDirectoryForCurrentUser }
+    init(history: HistoryStore) {
+        root = FileManager.default.homeDirectoryForCurrentUser
+        self.history = history
+    }
+
+    /// How much an item changed since a size recorded on an earlier day, when that's notable.
+    func change(of row: Row) -> (delta: Int64, since: Date)? {
+        guard let size = row.size, let change = history.value.change(of: row.id, now: size.bytes),
+              abs(change.delta) >= 500_000_000 else { return nil }
+        return change
+    }
 
     /// The deepest selected item: what the details panel shows and Move to Trash acts on.
     var selectedRow: Row? {
@@ -180,7 +191,15 @@ final class ExplorerModel {
                     enqueue()
                 }
             }
+            if !Task.isCancelled { recordSizes(in: url) }
         }
+    }
+
+    /// Remembers the sizes in the first two columns of the home folder, for "+18 GB since 12 Oct".
+    private func recordSizes(in folder: URL) {
+        guard root.path == home.path, let at = position(of: folder), at <= 1, columns[at].measuring == 0 else { return }
+        for row in columns[at].rows { if let size = row.size { history.value.record(folder: row.id, bytes: size.bytes) } }
+        history.save()
     }
 
     private func update(_ path: String, _ size: DiskSizer.Size, in folder: URL) {
@@ -223,4 +242,12 @@ final class ExplorerModel {
         tasks.values.forEach { $0.cancel() }
         tasks = [:]
     }
+}
+
+/// The app's one copy of `History`, shared by scans and the Disk Explorer.
+@MainActor
+final class HistoryStore {
+    var value = History.load()
+
+    func save() { try? value.save() }
 }

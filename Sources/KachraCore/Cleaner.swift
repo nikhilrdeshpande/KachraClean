@@ -141,6 +141,9 @@ public struct Cleaner: Sendable {
             return isDirectory.boolValue && isArtifact ? nil : "Not a recognised dependency or build folder."
         case .duplicates, .largeFiles:
             return isDirectory.boolValue ? "Expected a single file, found a folder." : nil
+        case .installers:
+            let ext = ((parts.last ?? "") as NSString).pathExtension.lowercased()
+            return InstallerScanner.extensions.contains(ext) ? nil : "Not a disk image or installer package." 
         case .apps:
             return parts[0] == "Library" ? nil : "App data must be inside Library."
         case .models, .trash:

@@ -20,7 +20,7 @@ public enum Safety: String, Codable, Sendable, CaseIterable, Comparable {
     public static func < (lhs: Safety, rhs: Safety) -> Bool { lhs.rank < rhs.rank }
 }
 
-public enum Category: String, Codable, Sendable, CaseIterable {
+public enum Category: String, Codable, CodingKeyRepresentable, Sendable, CaseIterable {
     case appCaches
     case logs
     case toolCaches
@@ -28,6 +28,7 @@ public enum Category: String, Codable, Sendable, CaseIterable {
     case largeFiles
     case projectArtifacts
     case duplicates
+    case installers
     case apps
     case trash
 
@@ -40,6 +41,7 @@ public enum Category: String, Codable, Sendable, CaseIterable {
         case .largeFiles: "Large files"
         case .projectArtifacts: "Project dependencies"
         case .duplicates: "Duplicate downloads"
+        case .installers: "Old installers"
         case .apps: "Applications"
         case .trash: "Trash"
         }

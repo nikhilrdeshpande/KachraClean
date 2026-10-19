@@ -17,6 +17,9 @@ KachraClean aims to cover both:
   whether a folder can be rebuilt from a lockfile.
 - **Model and toolchain caches** such as Hugging Face, Ollama, `~/.cache`, npm/pnpm/pip/uv and Homebrew.
 - **Duplicate downloads**, with a stated rule for which copy is kept.
+- **Old installers**: disk images and packages for apps that are already installed.
+- **What grew since last time**, so a runaway cache shows up before the disk is full.
+- **Docker**, broken down by what Docker itself can free, with its own commands to copy.
 - **Unused apps**, with the evidence behind each verdict ("last opened 12 Mar" vs. "no usage data").
 - **Disk Explorer**: every folder in your home, biggest first, in Finder-style columns. Suggestions
   are marked, and folders that hold them say how much, so space the scan doesn't recognise isn't

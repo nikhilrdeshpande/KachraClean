@@ -49,6 +49,8 @@ public struct Scanner: Sendable {
         case appCaches = "app caches"
         case projects = "projects"
         case duplicates = "duplicates"
+        case installers = "installers"
+        case docker = "docker"
         case largeFiles = "large files"
         case modelUsage = "model usage"
         case apps = "apps"
@@ -60,6 +62,8 @@ public struct Scanner: Sendable {
             case .appCaches: "App caches"
             case .projects: "Code projects"
             case .duplicates: "Duplicate downloads"
+            case .installers: "Old installers"
+            case .docker: "Docker"
             case .largeFiles: "Large files"
             case .modelUsage: "Which projects use each model"
             case .apps: "Applications"
@@ -81,6 +85,8 @@ public struct Scanner: Sendable {
         if !wanted.isDisjoint(with: [.appCaches, .toolCaches]) { steps.append(.appCaches) }
         if wanted.contains(.projectArtifacts) { steps.append(.projects) }
         if wanted.contains(.duplicates) { steps.append(.duplicates) }
+        if wanted.contains(.installers) { steps.append(.installers) }
+        if wanted.contains(.toolCaches), DockerScanner(home: home).cli != nil { steps.append(.docker) }
         if !wanted.isDisjoint(with: [.largeFiles, .models]) { steps.append(.largeFiles) }
         if wanted.contains(.models) { steps.append(.modelUsage) }
         if wanted.contains(.apps) { steps.append(.apps) }
@@ -126,6 +132,20 @@ public struct Scanner: Sendable {
         }
         if wanted.contains(.duplicates) {
             await timed(.duplicates) { await DuplicateScanner(roots: [options.downloads]).scan() }
+        }
+        if wanted.contains(.installers) {
+            await timed(.installers) {
+                // A copy in a duplicate group is handled there, so no path is in two findings.
+                let duplicated = Set(findings.filter { $0.category == .duplicates }.flatMap(\.paths))
+                return await InstallerScanner(home: home).scan().filter { !duplicated.contains($0.paths[0]) }
+            }
+        }
+        if wanted.contains(.toolCaches), DockerScanner(home: home).cli != nil, !Task.isCancelled {
+            progress?(.started(.docker))
+            let start = Date()
+            findings = await DockerScanner(home: home).annotate(findings)
+            timings[Step.docker.rawValue] = Date().timeIntervalSince(start)
+            progress?(.finished(.docker, found: 0))
         }
         if !wanted.isDisjoint(with: [.largeFiles, .models]) {
             await timed(.largeFiles) {
@@ -184,6 +204,8 @@ extension ScanReport {
         let fm = FileManager()
         try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true,
                                attributes: [.posixPermissions: 0o700])
+        // Also for a folder made by an older version with default permissions.
+        try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.deletingLastPathComponent().path)
         try encoder.encode(self).write(to: url, options: .atomic)
         try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }

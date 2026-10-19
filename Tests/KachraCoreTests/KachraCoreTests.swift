@@ -458,3 +458,118 @@ let longAgo = Date().addingTimeInterval(-200 * 86_400)
         #expect(outcome.first?.error == nil)
     }
 }
+
+@Suite struct InstallerTests {
+    let apps = [
+        InstallerScanner.InstalledApp(name: "Google Chrome", bundleID: "com.google.Chrome"),
+        InstallerScanner.InstalledApp(name: "Visual Studio Code", bundleID: "com.microsoft.VSCode"),
+        InstallerScanner.InstalledApp(name: "HyperFrames", bundleID: nil),
+        InstallerScanner.InstalledApp(name: "Arc", bundleID: "company.thebrowser.Browser"),
+    ]
+
+    @Test func matchesInstallersToInstalledAppsByName() {
+        #expect(InstallerScanner.match("googlechrome.dmg", apps: apps)?.name == "Google Chrome")
+        #expect(InstallerScanner.match("Install-HyperFrames-arm64.dmg", apps: apps)?.name == "HyperFrames")
+        #expect(InstallerScanner.match("VSCode-darwin-universal.pkg", apps: apps)?.name == "Visual Studio Code",
+                "matched through the bundle ID")
+        #expect(InstallerScanner.match("Archive-2024.dmg", apps: apps) == nil, "names under 4 characters never match")
+        #expect(InstallerScanner.match("Figma.dmg", apps: apps) == nil)
+    }
+
+    @Test func installedAppsMakeInstallersSafe() async throws {
+        let box = try Sandbox()
+        try box.file("Downloads/googlechrome.dmg", bytes: 20_000)
+        try box.file("Downloads/old/Figma.dmg", bytes: 20_000)
+        try box.file("Downloads/a/b/too-deep.pkg", bytes: 20_000)
+        try box.file("Downloads/notes.txt", bytes: 20_000)
+        let found = await InstallerScanner(home: box.root, installed: apps).scan()
+        #expect(found.count == 2)
+        #expect(found.first { $0.title == "googlechrome.dmg" }?.safety == .safe)
+        #expect(found.first { $0.title == "Figma.dmg" }?.safety == .review)
+        let cleaner = Cleaner(home: box.root, dryRun: true)
+        #expect(cleaner.refusal(for: box.root.appendingPathComponent("Downloads/googlechrome.dmg"), category: .installers) == nil)
+        #expect(cleaner.refusal(for: box.root.appendingPathComponent("Downloads/notes.txt"), category: .installers) != nil)
+    }
+}
+
+@Suite struct DockerTests {
+    let output = """
+        {"Active":"2","Reclaimable":"1.2GB (45%)","Size":"2.6GB","TotalCount":"5","Type":"Images"}
+        {"Active":"1","Reclaimable":"0B (0%)","Size":"12kB","TotalCount":"3","Type":"Containers"}
+        {"Active":"1","Reclaimable":"500MB (50%)","Size":"1GB","TotalCount":"2","Type":"Local Volumes"}
+        {"Active":"0","Reclaimable":"3.4GB","Size":"3.4GB","TotalCount":"40","Type":"Build Cache"}
+        """
+
+    @Test func parsesDockerSystemDf() {
+        let usage = DockerScanner.parse(output)
+        #expect(usage.map(\.type) == ["Images", "Containers", "Local Volumes", "Build Cache"])
+        #expect(usage[0].reclaimable == 1_200_000_000)
+        #expect(usage[1].size == 12_000)
+        #expect(usage[3].count == 40)
+    }
+
+    @Test func addsDockersOwnCommandsToTheDiskImageFinding() {
+        let vm = Finding(category: .toolCaches, title: "Docker Desktop disk", paths: ["/h/vms"], bytes: 10_000_000_000,
+                         safety: .risky, reason: "Holds everything.", details: ["rule": "docker-vm"])
+        let result = DockerScanner.annotate([vm], with: DockerScanner.parse(output))
+        #expect(result.count == 1)
+        let commands = result[0].details["commands"] ?? ""
+        #expect(commands.contains("docker image prune -a"))
+        #expect(commands.contains("docker builder prune"))
+        #expect(!commands.contains("docker container prune"), "nothing to free there")
+        #expect(result[0].safety == .risky, "the disk image itself stays risky")
+    }
+
+    @Test func withoutTheDiskImageItIsExplainedButNotCleanable() {
+        let result = DockerScanner.annotate([], with: DockerScanner.parse(output))
+        #expect(result.count == 1)
+        #expect(result[0].paths.isEmpty)
+        #expect(result[0].bytes == 5_100_000_000)
+    }
+}
+
+@Suite struct HistoryTests {
+    func report(_ date: Date, _ findings: [Finding]) -> ScanReport {
+        ScanReport(createdAt: date, findings: findings, volume: nil, timings: [:])
+    }
+
+    @Test func reportsWhatGrewSinceAnEarlierDay() {
+        let now = Date()
+        let uv = { (bytes: Int64) in Finding(category: .toolCaches, title: "uv", paths: ["/h/.cache/uv"], bytes: bytes,
+                                             safety: .safe, reason: "") }
+        let model = Finding(category: .models, title: "Qwen/Qwen2.5-7B", paths: ["/h/hub/q"], bytes: 15_000_000_000,
+                            safety: .review, reason: "")
+        let installer = Finding(category: .installers, title: "x.dmg", paths: ["/h/Downloads/x.dmg"], bytes: 900_000_000,
+                                safety: .safe, reason: "")
+        var history = History()
+        history.record(report(now.addingTimeInterval(-3 * 86_400), [uv(1_000_000_000)]))
+        history.record(report(now.addingTimeInterval(-3_600), [uv(1_050_000_000)]))  // too recent to be "last time"
+        let growth = history.growth(of: report(now, [uv(5_000_000_000), model, installer]))
+
+        #expect(growth?.since == history.scans.first?.date)
+        let titles = growth?.changes.map(\.title) ?? []
+        #expect(titles.contains("uv"))
+        #expect(titles.contains("Developer tool caches"))
+        #expect(!titles.contains("Qwen/Qwen2.5-7B"), "its category didn't exist in the baseline")
+        #expect(!titles.contains("x.dmg"))
+    }
+
+    @Test func folderChangesNeedASampleFromAnEarlierDay() {
+        var history = History()
+        let now = Date()
+        history.record(folder: "/h/code", bytes: 100, at: now.addingTimeInterval(-2 * 86_400))
+        history.record(folder: "/h/code", bytes: 150, at: now)
+        #expect(history.change(of: "/h/code", now: 180, at: now)?.delta == 80)
+        #expect(history.change(of: "/h/new", now: 180, at: now) == nil)
+    }
+
+    @Test func historyRoundTripsThroughJSON() throws {
+        let box = try Sandbox()
+        var history = History()
+        history.record(report(Date(), [Finding(category: .logs, title: "l", paths: ["/h/l"], bytes: 20_000_000,
+                                               safety: .safe, reason: "")]))
+        let url = box.root.appendingPathComponent("history.json")
+        try history.save(to: url)
+        #expect(History.load(from: url).scans.first?.categories[.logs] == 20_000_000)
+    }
+}

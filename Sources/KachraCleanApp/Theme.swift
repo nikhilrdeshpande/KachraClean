@@ -15,6 +15,7 @@ extension Category {
         case .largeFiles: "film.stack.fill"
         case .projectArtifacts: "shippingbox.fill"
         case .duplicates: "doc.on.doc.fill"
+        case .installers: "arrow.down.app.fill"
         case .apps: "app.badge.fill"
         case .trash: "trash.fill"
         }
@@ -29,6 +30,7 @@ extension Category {
         case .appCaches: .blue
         case .logs: .teal
         case .duplicates: .pink
+        case .installers: .brown
         case .apps: .green
         case .trash: .gray
         }
@@ -44,6 +46,7 @@ extension Category {
         case .appCaches: "Data apps keep to load faster. Recreated automatically."
         case .logs: "Diagnostic logs apps write. Only useful when debugging."
         case .duplicates: "Identical copies of the same file in Downloads. One copy is always kept."
+        case .installers: "Disk images and installer packages in Downloads and on the Desktop, for apps that are already installed."
         case .apps: "Installed apps with everything they store on your Mac."
         case .trash: "Things you already deleted."
         }
@@ -51,7 +54,7 @@ extension Category {
 
     /// Display order: biggest wins for developers first; apps and Trash last.
     static let displayOrder: [Category] = [
-        .projectArtifacts, .models, .largeFiles, .toolCaches, .appCaches, .logs, .duplicates, .apps, .trash,
+        .projectArtifacts, .models, .largeFiles, .toolCaches, .appCaches, .logs, .duplicates, .installers, .apps, .trash,
     ]
 }
 

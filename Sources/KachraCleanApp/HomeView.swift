@@ -160,6 +160,7 @@ struct ResultsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 32) {
             hero
+            if let growth = model.growth, !growth.changes.isEmpty { GrowthCard(growth: growth, open: open) }
             VStack(alignment: .leading, spacing: 14) {
                 Text("By category").font(.title2.bold())
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 14)], spacing: 14) {
@@ -335,12 +336,60 @@ struct CategoryCard: View {
             let unused = items.filter { $0.details["unused"] == "yes" }.count
             return unused > 0 ? "\(items.count) apps · \(unused) not opened in \(model.unusedAppDays)+ days"
                               : "\(items.count) apps with their data"
+        case .installers:
+            let installed = items.filter { $0.details["installs"] != nil }.count
+            return "\(items.count) installers · \(installed) for apps already installed"
         case .duplicates:
             let copies = items.reduce(0) { $0 + $1.paths.count }
             return "\(copies) extra copies in \(items.count) groups · one copy always kept"
         default:
             let top = items.prefix(3).map { $0.owner ?? $0.title }
             return top.isEmpty ? category.blurb : "Mostly " + ListFormatter.localizedString(byJoining: top)
+        }
+    }
+}
+
+/// What grew since an earlier scan: the early warning for a runaway cache or model folder.
+struct GrowthCard: View {
+    var growth: History.Growth
+    var open: (Category) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("What grew since \(growth.since.formatted(.dateTime.day().month()))").font(.title2.bold())
+                Text(Format.relative(growth.since) ?? "").foregroundStyle(.secondary)
+            }
+            VStack(spacing: 0) {
+                ForEach(Array(growth.changes.enumerated()), id: \.element.id) { index, change in
+                    Button { open(change.category) } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: change.category.symbol)
+                                .foregroundStyle(change.category.tint)
+                                .frame(width: 22)
+                            Text(change.title).lineLimit(1).truncationMode(.middle)
+                                .fontWeight(change.isCategory ? .semibold : .regular)
+                            if change.isNew {
+                                Text("new").font(.caption.weight(.semibold)).foregroundStyle(.blue)
+                                    .padding(.horizontal, 6).padding(.vertical, 1)
+                                    .background(.blue.opacity(0.13), in: Capsule())
+                            }
+                            if !change.isCategory {
+                                Text(change.category.title).font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text("+" + Format.bytes(change.delta)).monospacedDigit().foregroundStyle(.orange)
+                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                        }
+                        .padding(.vertical, 9)
+                        .padding(.horizontal, 14)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    if index < growth.changes.count - 1 { Divider().padding(.leading, 48) }
+                }
+            }
+            .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 14))
         }
     }
 }

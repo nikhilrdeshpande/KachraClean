@@ -240,6 +240,11 @@ struct ExplorerRowView: View {
                         }
                 }
                 .frame(height: 3)
+                if let change = model.explorer.change(of: row) {
+                    Text("\(change.delta > 0 ? "+" : "−")\(Format.bytes(abs(change.delta))) since \(change.since.formatted(.dateTime.day().month()))")
+                        .font(.caption2)
+                        .foregroundStyle(change.delta > 0 ? .orange : .green)
+                }
                 if let finding {
                     Text(finding.category.title).font(.caption2).foregroundStyle(finding.category.tint)
                 } else if let inside, !inside.findings.isEmpty {
