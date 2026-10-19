@@ -32,7 +32,7 @@ Safety comes first:
 - Nothing is deleted without a preview.
 - Removal moves items to the Trash.
 
-> Status: early preview (0.1.2). The research phase is complete (see `docs/spec/`).
+> Status: early preview (0.1.3). The research phase is complete (see `docs/spec/`).
 
 ## Download
 
