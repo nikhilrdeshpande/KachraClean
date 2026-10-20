@@ -209,10 +209,14 @@ final class ExplorerModel {
     }
 
     private func resize(ancestorsOf path: String, in index: Int, by delta: Int64) {
-        for r in columns[index].rows.indices where path.hasPrefix(columns[index].rows[r].id + "/") {
-            columns[index].rows[r].size?.bytes = max(0, columns[index].rows[r].bytes + delta)
+        // On a copy: `size?.bytes = …` evaluates its right side inside the write to `columns`, and
+        // reading `columns` there is an overlapping access that aborts at runtime.
+        var rows = columns[index].rows
+        for r in rows.indices where path.hasPrefix(rows[r].id + "/") {
+            let bytes = max(0, rows[r].bytes + delta)
+            rows[r].size?.bytes = bytes
         }
-        columns[index].rows = Self.sorted(columns[index].rows)
+        columns[index].rows = Self.sorted(rows)
     }
 
     /// Largest first; items still being measured last, by name.
